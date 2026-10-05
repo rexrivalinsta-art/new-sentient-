@@ -360,7 +360,9 @@ async def user_wallet(body: dict):
     w = str(body.get("wallet", ""))
     if not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", w):
         raise HTTPException(400, "Invalid wallet")
-    await db.users.update_one({"wallet": w}, {"$set": {"lastSeen": iso()}, "$setOnInsert": User(wallet=w).to_mongo()}, upsert=True)
+    insert_doc = User(wallet=w).to_mongo()
+    insert_doc.pop("lastSeen", None)  # avoid conflict with $set below
+    await db.users.update_one({"wallet": w}, {"$set": {"lastSeen": iso()}, "$setOnInsert": insert_doc}, upsert=True)
     return {"ok": True}
 
 
