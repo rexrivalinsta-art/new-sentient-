@@ -40,6 +40,22 @@ function HeroStage({ bundle }) {
   );
 }
 
+function PreviewStage() {
+  const [avatar, setAvatar] = useState(null);
+  useEffect(() => {
+    api.avatars({ featured: true, limit: 20 }).then((d) => setAvatar(d.items[Math.floor(Math.random() * d.items.length)]));
+  }, []);
+  return (
+    <LiveCharacterStage avatar={avatar} driver={() => ({ emotion: "IDLE" })} className="h-[440px] md:h-[620px] border border-[#161a22]" testid="hero-preview-stage">
+      <div className="absolute top-0 inset-x-0 p-6 z-10">
+        <span className="px-2 py-1 border border-slate-600 font-mono text-[10px] tracking-[0.2em] text-slate-300">PREVIEW · NO TOKEN YET</span>
+        <div className="font-display font-black uppercase text-2xl md:text-4xl mt-3">Waiting for a mind</div>
+      </div>
+      <p className="absolute bottom-8 left-6 z-10 font-display font-semibold text-lg md:text-2xl">Launch a token and I wake up.</p>
+    </LiveCharacterStage>
+  );
+}
+
 export default function Home() {
   const items = useTokens({ sort: "mcap" });
   const featured = items?.[0];
@@ -65,7 +81,7 @@ export default function Home() {
           </div>
         </div>
         <div className="rise" style={{ animationDelay: "120ms" }}>
-          {featured ? <HeroStage bundle={featured} /> : <div className="h-[440px] md:h-[620px] border border-[#161a22] bg-[#07080b]" />}
+          {featured ? <HeroStage bundle={featured} /> : items ? <PreviewStage /> : <div className="h-[440px] md:h-[620px] border border-[#161a22] bg-[#07080b]" />}
         </div>
       </section>
 
@@ -80,6 +96,13 @@ export default function Home() {
           {!items && Array.from({ length: 8 }).map((_, i) => <div key={i} className="aspect-[4/3.6] bg-[#0b0d10] border border-[#161a22] animate-pulse" />)}
           {items?.map((b, i) => <TokenCard key={b.token.id} bundle={b} index={i} />)}
         </div>
+        {items && !items.length && (
+          <div className="border border-dashed border-[#1e2430] p-10 md:p-16 text-center" data-testid="live-tokens-empty">
+            <div className="font-display font-black uppercase text-2xl md:text-3xl">No tokens launched yet</div>
+            <p className="text-slate-500 mt-2 text-sm">Only tokens launched or linked here appear. No demo or simulated data.</p>
+            <Link to="/create" data-testid="empty-create-cta" className="inline-block mt-6 bg-white text-black px-6 py-3 font-display font-black tracking-[0.2em] text-sm hover:bg-[#00f0ff]">CREATE THE FIRST</Link>
+          </div>
+        )}
       </section>
     </div>
   );

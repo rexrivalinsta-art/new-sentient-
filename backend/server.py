@@ -133,6 +133,7 @@ class Token(BaseDocument):
     launchMarketCap: Optional[float] = None
     createdAt: str = Field(default_factory=iso)
     launchedAt: Optional[str] = None
+    importedBy: Optional[str] = None
 
 
 class TokenCreate(BaseModel):
@@ -754,7 +755,7 @@ async def import_token(body: dict):
         raise HTTPException(422, "Token not indexed yet — enter name and ticker")
     ch = await generate_character(GenerateReq(vibe=body.get("vibe") or "random", prompt=body.get("prompt") or "", ticker=ticker))
     tok = Token(name=name[:32], ticker=ticker.upper()[:10], imageUrl=(info or {}).get("imageUrl"), website=(info or {}).get("website") or "",
-                avatarId=ch["avatarId"], status="draft")
+                avatarId=ch["avatarId"], status="draft", importedBy="user")
     prof = CharacterProfile(tokenId=tok.id, characterName=ch["characterName"], vibe=ch["vibe"], traits=ch["traits"], prompt=ch["prompt"],
                             voice=ch["voice"], animationProfile=ch["animationProfile"], avatarId=ch["avatarId"], backstory=ch["backstory"])
     tok.characterProfileId = prof.id
@@ -779,7 +780,7 @@ async def seed():
     await db.tokens.create_index("mint")
     await db.market_events.create_index([("mint", 1), ("timestamp", -1)])
     await db.market_snapshots.create_index([("mint", 1), ("timestamp", -1)])
-    for t in await db.tokens.find({"simulated": True}, {"_id": 0}).to_list(500):
+    for t in await db.tokens.find({"$or": [{"simulated": True}, {"launchProvider": "import", "importedBy": {"$exists": False}}]}, {"_id": 0}).to_list(500):
         await db.character_profiles.delete_many({"id": t.get("characterProfileId")})
         for col in ("market_events", "market_snapshots", "character_memory"):
             await db[col].delete_many({"mint": t.get("mint")})
@@ -837,7 +838,6 @@ async def startup():
     asyncio.create_task(hub.autopilot_loop())
     asyncio.create_task(hub.tick_loop())
     asyncio.create_task(hub.indexer_loop())
-    asyncio.create_task(top_up_real_tokens())
 
 
 @app.on_event("shutdown")

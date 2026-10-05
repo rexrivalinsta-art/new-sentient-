@@ -38,6 +38,10 @@ Pump.fun-based launchpad where every token is a LIVE AI 3D character (VRM, Three
 - DexScreener batched polling for all real tokens (45s): mcap, 1h/24h change, 24h volume; Solana RPC live trades on viewed tokens
 - Character Lab remains a dev-only simulator (/dev/character-lab)
 
+## Iteration 4 (2026-06)
+- Removed auto-imported trending tokens and the top-up loop: feed shows ONLY tokens launched or deliberately linked/imported by a user here (importedBy="user")
+- Home: honest empty state + "PREVIEW · NO TOKEN YET" idle character when no tokens exist
+
 ## Backlog
 - P1: Kokoro WebGPU path for faster voice on capable desktops; pre-synthesis of queued lines
 - P1: Holder count via free source; PumpSwap trade-level parsing (currently state-level via DexScreener)
