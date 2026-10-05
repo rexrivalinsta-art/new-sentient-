@@ -1,0 +1,118 @@
+{
+  "project_title": "Pump.fun x Twitch AI Live Token Launchpad",
+  "theme": "Dark / Technical / Cinematic / Cyber-Laboratory",
+  "design_direction": {
+    "vibe": "Pump.fun x Twitch x futuristic AI laboratory. Dark, highly polished, technical, cinematic, premium, minimal, character-first.",
+    "backgrounds": "Deep charcoal (#0B0D10) and jet black (#050608) with high-density subtle grid overlays and micro-borders.",
+    "accent_strategy": "Restrained neon accents: Cyber Cyan (#00F0FF) for active state/live, Crimson Red (#FF2E51) for dump/sell, Emerald Green (#00E699) for buy/pump, Amber Gold (#FFB800) for ATH/milestone. No excessive multi-color gradients or standard SaaS rainbow glow.",
+    "typography": "Barlow / Space Grotesk / JetBrains Mono hybrid aesthetic. Headings are aggressive, uppercase, tracked-tight. Technical readouts, tickers, and logs use crisp tabular monospace."
+  },
+  "typography": {
+    "heading_font": "Space Grotesk, sans-serif",
+    "body_font": "Inter, sans-serif",
+    "mono_font": "JetBrains Mono, monospace",
+    "hierarchy": {
+      "hero_title": "text-4xl md:text-6xl font-black uppercase tracking-tight leading-none",
+      "section_title": "text-2xl md:text-3xl font-bold uppercase tracking-tight text-white",
+      "card_title": "text-lg font-bold tracking-normal text-slate-100",
+      "body": "text-sm md:text-base text-slate-300 font-normal leading-relaxed",
+      "caption": "text-xs font-mono uppercase tracking-widest text-slate-400"
+    }
+  },
+  "colors": {
+    "bg_primary": "#050608",
+    "bg_secondary": "#0D0F12",
+    "bg_card": "#12151B",
+    "bg_card_hover": "#171B24",
+    "border_subtle": "#1E2430",
+    "border_active": "#00F0FF33",
+    "text_primary": "#F1F5F9",
+    "text_secondary": "#94A3B8",
+    "text_muted": "#64748B",
+    "accent_live": "#00F0FF",
+    "accent_pump": "#00E699",
+    "accent_dump": "#FF2E51",
+    "accent_ath": "#FFB800",
+    "accent_purple": "#A855F7"
+  },
+  "layout_specs": {
+    "header": {
+      "style": "Fixed z-50 top-0 w-full h-16 backdrop-blur-md bg-black/80 border-b border-[#1E2430] px-4 md:px-8 flex items-center justify-between",
+      "logo": "Bold AI Laboratory brand mark with live pulsating badge",
+      "nav_items": ["Explore", "Create Token", "Character Lab", "Connect Wallet CTA"]
+    },
+    "page_hero": {
+      "route": "/",
+      "headline": "EVERY TOKEN IS ALIVE.",
+      "subheadline": "Launch a token. Give it a body, voice and mind.",
+      "cta": "CREATE TOKEN",
+      "livestream_cards": "Grid layout (grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6). Each card features thumbnail, LIVE pulsing indicator, token name, $TICKER, Market Cap, 24h % change, and scrolling live subtitle preview."
+    },
+    "page_create": {
+      "route": "/create",
+      "form_elements": ["Token Name input", "$TICKER input", "Description textarea", "Token Avatar Image upload/selector"],
+      "vibe_chips": ["Commander", "Wall Street", "Chaotic", "Villain", "Anime", "Robot", "Aristocrat", "News Anchor", "Hacker", "Scientist", "Alien", "Meme", "Random"],
+      "actions": ["GENERATE CHARACTER", "REROLL CHARACTER", "LAUNCH ON PUMP.FUN"],
+      "warning": "Immutable Metadata Warning box with terminal yellow alert styling"
+    },
+    "page_token": {
+      "route": "/token/:mint",
+      "desktop_layout": "Left 65% cinematic 3D character stage with ● AI LIVE badge, character name, $TICKER, mood subtitle, status indicator (LISTENING / THINKING / SPEAKING), and ENTER LIVE / UNMUTE AI button. Right 35% live market parameters (Market Cap, Price, 24h Volume, ATH), candlestick / price chart, live trade stream feed, and AI memory highlights.",
+      "mobile_layout": "Character stage rendered first at 50vh height, followed by stacked trade feed, chart, and stats tabs."
+    },
+    "page_explore": {
+      "route": "/explore",
+      "features": ["Category filters (Top Market Cap, Live Now, ATH Breakers, Newest)", "Search bar by name/ticker", "Sort by volume / mcap / gainers", "Bento grid of character cards"]
+    },
+    "page_dev_lab": {
+      "route": "/dev/character-lab",
+      "features": ["Avatar / Personality / Voice Selectors", "Interactive Market Cap Slider", "Simulation triggers: Small Buy, Whale Buy, Small Sell, Whale Sell, Buy Streak, Sell Streak, 20% Rally, 20% Dump, New ATH +100K Milestone, Recovery, Quiet", "Realtime Dialogue Log, AI Long-Term Memory State, Emotion Matrix"]
+    }
+  },
+  "component_styles": {
+    "buttons": {
+      "primary": "bg-[#00F0FF] hover:bg-[#33F3FF] text-black font-bold uppercase tracking-wider px-6 py-3 rounded-none shadow-[0_0_20px_rgba(0,240,255,0.3)] transition-all flex items-center gap-2",
+      "secondary": "bg-[#161B22] border border-[#1E2430] hover:border-[#00F0FF]/50 text-slate-200 font-medium px-4 py-2.5 rounded-none transition-all",
+      "danger": "bg-[#FF2E51]/10 border border-[#FF2E51]/40 text-[#FF2E51] hover:bg-[#FF2E51]/20 font-bold px-4 py-2"
+    },
+    "cards": {
+      "live_token": "relative bg-[#0D0F12] border border-[#1E2430] hover:border-[#00F0FF]/40 transition-all p-4 group overflow-hidden shadow-lg",
+      "character_stage": "relative bg-gradient-to-b from-[#0B0D12] to-[#050608] border border-[#1E2430] h-[550px] w-full flex flex-col justify-between p-6 overflow-hidden"
+    },
+    "badges": {
+      "live": "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-bold bg-[#FF2E51]/15 border border-[#FF2E51]/40 text-[#FF2E51] rounded-none animate-pulse",
+      "status": "px-2 py-0.5 text-xs font-mono border bg-[#00F0FF]/10 border-[#00F0FF]/30 text-[#00F0FF]"
+    }
+  },
+  "3d_and_audio": {
+    "stage_rendering": "Three.js / React Three Fiber / Canvas fallback with 3D VRM character model, orbital lighting, floating particle field, and audio lip-sync spectrum analyzer.",
+    "tts_engine": "Browser Kokoro / Web Speech API / Web Audio API synthesizers with interactive audio visualizer waveform bars."
+  },
+  "image_urls": {
+    "robot_avatar": "https://images.unsplash.com/photo-1625314868143-20e93ce3ff33?crop=entropy&cs=srgb&fm=jpg&q=85",
+    "cyber_warrior": "https://images.pexels.com/photos/8108095/pexels-photo-8108095.jpeg?auto=compress&cs=tinysrgb&h=650&w=940",
+    "cyber_samurai": "https://images.pexels.com/photos/31971484/pexels-photo-31971484.jpeg?auto=compress&cs=tinysrgb&h=650&w=940",
+    "hacker_portrait": "https://images.unsplash.com/photo-1580046939256-c377c5b099f1?crop=entropy&cs=srgb&fm=jpg&q=85",
+    "villain_portrait": "https://images.unsplash.com/photo-1573039797694-30c7846ddba5?crop=entropy&cs=srgb&fm=jpg&q=85"
+  },
+  "test_attributes": {
+    "rule": "All buttons, inputs, tabs, cards, and key stats MUST include explicit data-testid attributes in kebab-case.",
+    "examples": [
+      "data-testid=\"nav-create-button\"",
+      "data-testid=\"hero-create-cta\"",
+      "data-testid=\"token-card-live-badge\"",
+      "data-testid=\"character-stage-unmute-button\"",
+      "data-testid=\"vibe-chip-commander\"",
+      "data-testid=\"sim-button-whale-buy\"",
+      "data-testid=\"sim-button-20-rally\"",
+      "data-testid=\"trade-stream-feed\""
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Follow the exact dark cyber-laboratory design language defined above.",
+    "Ensure all 5 required routes are fully implemented and functional: /, /create, /token/:mint, /explore, /dev/character-lab.",
+    "Ensure character stage on /token/:mint is prominent (desktop 65% width) with interactive sound/unmute toggle and real-time trade event reaction simulations.",
+    "Use data-testid on every interactive element for seamless testing.",
+    "Do NOT use bright childish colors or generic SaaS rounded cards. Maintain sharp edges, technical mono typography, and high contrast stats."
+  ]
+}

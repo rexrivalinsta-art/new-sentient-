@@ -1,0 +1,675 @@
+import asyncio
+import base64
+import logging
+import os
+import random
+import re
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+import httpx
+import requests
+from dotenv import load_dotenv
+from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, Response
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.middleware.cors import CORSMiddleware
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
+from market import SIGNIFICANT, MarketEngine  # noqa: E402
+from personalities import ANIMATION_PROFILES, VIBES, detect_vibe, pick_name  # noqa: E402
+from providers import Hub, SolPrice, dexscreener_snapshot  # noqa: E402
+from registry import build_registry  # noqa: E402
+
+client = AsyncIOMotorClient(os.environ["MONGO_URL"])
+db = client[os.environ["DB_NAME"]]
+SOLANA_RPC_URL = os.environ["SOLANA_RPC_URL"]
+PUMPPORTAL_TRADE_LOCAL = os.environ["PUMPPORTAL_TRADE_LOCAL_URL"]
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("server")
+
+app = FastAPI()
+api = APIRouter(prefix="/api")
+
+# ---------------- storage ----------------
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+APP_NAME = "alivepad"
+storage_key = None
+
+
+def init_storage(force=False):
+    global storage_key
+    if storage_key and not force:
+        return storage_key
+    r = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": os.environ.get("EMERGENT_LLM_KEY")}, timeout=30)
+    r.raise_for_status()
+    storage_key = r.json()["storage_key"]
+    return storage_key
+
+
+def put_object(path, data, content_type):
+    r = requests.put(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": init_storage(), "Content-Type": content_type}, data=data, timeout=120)
+    if r.status_code == 404:
+        r = requests.put(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": init_storage(True), "Content-Type": content_type}, data=data, timeout=120)
+    r.raise_for_status()
+    return r.json()
+
+
+def get_object(path):
+    r = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": init_storage()}, timeout=60)
+    r.raise_for_status()
+    return r.content, r.headers.get("Content-Type", "application/octet-stream")
+
+
+# ---------------- models ----------------
+def iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+class BaseDocument(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+
+    @classmethod
+    def from_mongo(cls, doc):
+        if not doc:
+            return None
+        doc = dict(doc)
+        doc.pop("_id", None)
+        return cls(**doc)
+
+    def to_mongo(self):
+        return self.model_dump()
+
+
+class User(BaseDocument):
+    wallet: str
+    createdAt: str = Field(default_factory=iso)
+    lastSeen: str = Field(default_factory=iso)
+
+
+class CharacterProfile(BaseDocument):
+    tokenId: Optional[str] = None
+    mint: Optional[str] = None
+    characterName: str
+    vibe: str
+    traits: list = []
+    prompt: str = ""
+    voice: str
+    animationProfile: str
+    avatarId: str
+    backstory: str = ""
+    createdAt: str = Field(default_factory=iso)
+
+
+class Token(BaseDocument):
+    mint: Optional[str] = None
+    name: str
+    ticker: str
+    description: str = ""
+    imageUrl: Optional[str] = None
+    imagePath: Optional[str] = None
+    twitter: str = ""
+    telegram: str = ""
+    website: str = ""
+    pair: str = "SOL"
+    status: str = "draft"
+    launchProvider: Optional[str] = None
+    launchSignature: Optional[str] = None
+    simulated: bool = False
+    creatorWallet: Optional[str] = None
+    characterProfileId: Optional[str] = None
+    avatarId: Optional[str] = None
+    launchMarketCap: Optional[float] = None
+    createdAt: str = Field(default_factory=iso)
+    launchedAt: Optional[str] = None
+
+
+class TokenCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=32)
+    ticker: str = Field(min_length=1, max_length=10)
+    description: str = Field(default="", max_length=500)
+    imageUrl: Optional[str] = None
+    imagePath: Optional[str] = None
+    twitter: str = ""
+    telegram: str = ""
+    website: str = ""
+    pair: str = "SOL"
+    creatorWallet: Optional[str] = None
+    character: dict
+
+
+class GenerateReq(BaseModel):
+    vibe: Optional[str] = None
+    prompt: str = ""
+    ticker: str = ""
+    exclude: list = []
+
+
+# ---------------- hub callbacks ----------------
+_last_mem_save = {}
+
+
+async def on_events(mint, evs):
+    if mint.startswith("LAB"):
+        return
+    sig = [e for e in evs if e["type"] in SIGNIFICANT]
+    if sig:
+        await db.market_events.insert_many([{"id": e["id"], "mint": mint, "type": e["type"], "timestamp": e["timestamp"],
+                                             "marketCap": e["marketCap"], "data": e["data"]} for e in sig])
+    if sig or time.time() - _last_mem_save.get(mint, 0) > 20:
+        _last_mem_save[mint] = time.time()
+        await save_memory(mint)
+    last = evs[-1]
+    await db.tokens.update_one({"mint": mint}, {"$set": {"lastEvent": {k: last[k] for k in ("type", "timestamp", "data", "marketCap")}}})
+
+
+async def save_memory(mint):
+    eng = hub.engine(mint)
+    if eng:
+        await db.character_memory.update_one({"mint": mint}, {"$set": {"mint": mint, "memory": eng.persistable_memory(), "updatedAt": iso()}}, upsert=True)
+
+
+async def on_snapshot(mint, eng):
+    if mint.startswith("LAB"):
+        return
+    await db.market_snapshots.insert_one({"mint": mint, "timestamp": time.time(), "marketCap": eng.mcap, "price": eng.price,
+                                          "volume5m": eng._volume(300), "athMarketCap": eng.memory["athMarketCap"]})
+    await save_memory(mint)
+
+
+hub = Hub(on_events, on_snapshot)
+
+
+async def ensure_engine(token):
+    mint = token["mint"]
+    eng = hub.engine(mint)
+    if eng:
+        return eng
+    mem_doc = await db.character_memory.find_one({"mint": mint}, {"_id": 0})
+    snap = await db.market_snapshots.find_one({"mint": mint}, {"_id": 0}, sort=[("timestamp", -1)])
+    launched = token.get("launchedAt")
+    launch_ts = datetime.fromisoformat(launched).timestamp() if launched else time.time()
+    sol = await SolPrice.refresh()
+    if token.get("simulated"):
+        mcap = (snap or {}).get("marketCap") or token.get("launchMarketCap") or 30000
+        eng = MarketEngine(mint, sol, mcap, launch_ts, (mem_doc or {}).get("memory"))
+        hist = await db.market_snapshots.find({"mint": mint}, {"_id": 0}).sort("timestamp", -1).to_list(120)
+        if hist:
+            eng.history.clear()
+            for h in reversed(hist):
+                eng.history.append((h["timestamp"], h["price"], h["marketCap"]))
+        hub.register(eng, simulated=True, autopilot=True)
+    else:
+        eng = MarketEngine(mint, sol, None, launch_ts, (mem_doc or {}).get("memory"))
+        ds = await dexscreener_snapshot(mint)
+        if ds and ds.get("marketCap"):
+            eng.set_external_state(float(ds["marketCap"]), ds.get("priceUsd"))
+        hub.register(eng, simulated=False)
+    return eng
+
+
+# ---------------- character generation ----------------
+async def generate_character(req: GenerateReq):
+    rng = random.Random()
+    vibe = detect_vibe(req.vibe if req.vibe and req.vibe != "random" else None, req.prompt, rng)
+    meta = VIBES[vibe]
+    words = set(re.findall(r"[a-z]{3,}", req.prompt.lower()))
+    cands = await db.avatars.find({"enabled": True, "archetypes": {"$in": meta["archetypes"]}, "id": {"$nin": req.exclude}}, {"_id": 0}).to_list(600)
+    if not cands:
+        cands = await db.avatars.find({"enabled": True, "id": {"$nin": req.exclude}}, {"_id": 0}).limit(200).to_list(200)
+
+    def score(a):
+        s = a["qualityScore"] + rng.uniform(0, 35)
+        if a["archetype"] == meta["archetypes"][0]:
+            s += 20
+        if any(w in a["name"].lower() for w in words):
+            s += 25
+        return s
+
+    top = sorted(cands, key=score, reverse=True)[:6]
+    avatar = rng.choice(top[:3]) if top else None
+    if not avatar:
+        raise HTTPException(503, "Avatar registry empty")
+    voices = [v for v in meta["voices"] if v in avatar["compatibleVoices"]] or meta["voices"]
+    t = (req.ticker or "TOKEN").upper().lstrip("$")
+    return {
+        "characterName": pick_name(vibe, t, rng),
+        "vibe": vibe,
+        "vibeLabel": meta["label"],
+        "traits": meta["traits"],
+        "prompt": req.prompt,
+        "voice": rng.choice(voices),
+        "animationProfile": meta["animation"],
+        "animationParams": ANIMATION_PROFILES[meta["animation"]],
+        "avatarId": avatar["id"],
+        "avatar": avatar,
+        "backstory": meta["backstory"].replace("{T}", t) + (f" Creator brief: \"{req.prompt.strip()[:160]}\"" if req.prompt.strip() else ""),
+        "analysis": {"detectedVibe": vibe, "matchedKeywords": [k for k in meta["keywords"] if k in req.prompt.lower()], "candidates": len(cands)},
+    }
+
+
+# ---------------- serialization ----------------
+async def token_bundle(t, full=False):
+    profile = await db.character_profiles.find_one({"id": t.get("characterProfileId")}, {"_id": 0})
+    avatar = await db.avatars.find_one({"id": t.get("avatarId")}, {"_id": 0})
+    if profile:
+        profile["animationParams"] = ANIMATION_PROFILES.get(profile["animationProfile"])
+        profile["vibeLabel"] = VIBES.get(profile["vibe"], {}).get("label")
+    out = {"token": t, "profile": profile, "avatar": avatar}
+    eng = hub.engine(t["mint"]) if t.get("mint") else None
+    if t.get("mint") and t["status"] == "live" and not eng and full:
+        eng = await ensure_engine(t)
+    if eng:
+        st = eng.state()
+        out["state"] = st if full else {k: st[k] for k in ("marketCap", "price", "athMarketCap", "price1hAgo", "price5mAgo", "volume5m", "volume1h", "lastUpdated")}
+        out["memory"] = eng.memory_view()
+        if full:
+            out["history"] = eng.history_points()
+    if full and t.get("mint"):
+        out["events"] = await db.market_events.find({"mint": t["mint"]}, {"_id": 0}).sort("timestamp", -1).to_list(30)
+        out["feedStatus"] = "simulated" if t.get("simulated") else hub.feed_status
+    return out
+
+
+def public_base(request: Request):
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL.rstrip("/")
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host"))
+    return f"{proto}://{host}"
+
+
+# ---------------- routes ----------------
+@api.get("/")
+async def root():
+    return {"ok": True, "service": "alive-launchpad"}
+
+
+@api.get("/vibes")
+async def vibes():
+    return {"vibes": [{"id": k, "label": v["label"], "voices": v["voices"], "animation": v["animation"], "traits": v["traits"]} for k, v in VIBES.items()],
+            "animationProfiles": ANIMATION_PROFILES}
+
+
+@api.get("/avatars")
+async def list_avatars(archetype: Optional[str] = None, q: Optional[str] = None, featured: Optional[bool] = None, limit: int = 60, offset: int = 0):
+    f = {"enabled": True}
+    if archetype:
+        f["archetypes"] = archetype
+    if q:
+        f["name"] = {"$regex": re.escape(q), "$options": "i"}
+    if featured is not None:
+        f["featured"] = featured
+    total = await db.avatars.count_documents(f)
+    items = await db.avatars.find(f, {"_id": 0}).sort([("qualityScore", -1), ("name", 1)]).skip(offset).limit(min(limit, 200)).to_list(200)
+    return {"total": total, "items": items}
+
+
+@api.get("/avatars/stats")
+async def avatar_stats():
+    pipeline = [{"$group": {"_id": "$collection", "count": {"$sum": 1}, "license": {"$first": "$license"}}}]
+    cols = await db.avatars.aggregate(pipeline).to_list(50)
+    return {"total": await db.avatars.count_documents({}), "collections": [{"name": c["_id"], "count": c["count"], "license": c["license"]} for c in cols]}
+
+
+@api.get("/avatars/{avatar_id}")
+async def get_avatar(avatar_id: str):
+    a = await db.avatars.find_one({"id": avatar_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Avatar not found")
+    return a
+
+
+@api.post("/characters/generate")
+async def characters_generate(req: GenerateReq):
+    return await generate_character(req)
+
+
+@api.post("/users/wallet")
+async def user_wallet(body: dict):
+    w = str(body.get("wallet", ""))
+    if not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", w):
+        raise HTTPException(400, "Invalid wallet")
+    await db.users.update_one({"wallet": w}, {"$set": {"lastSeen": iso()}, "$setOnInsert": User(wallet=w).to_mongo()}, upsert=True)
+    return {"ok": True}
+
+
+ALLOWED_IMG = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}
+
+
+@api.post("/upload")
+async def upload(request: Request, file: UploadFile = File(...)):
+    if file.content_type not in ALLOWED_IMG:
+        raise HTTPException(400, "Only PNG, JPG, WEBP or GIF")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Max 5MB")
+    path = f"{APP_NAME}/token-images/{uuid.uuid4().hex}.{ALLOWED_IMG[file.content_type]}"
+    res = await asyncio.to_thread(put_object, path, data, file.content_type)
+    await db.files.insert_one({"id": uuid.uuid4().hex, "storage_path": res["path"], "original_filename": file.filename,
+                               "content_type": file.content_type, "size": res.get("size"), "is_deleted": False, "created_at": iso()})
+    return {"path": res["path"], "url": f"{public_base(request)}/api/files/{res['path']}"}
+
+
+@api.get("/files/{path:path}")
+async def files(path: str):
+    rec = await db.files.find_one({"storage_path": path, "is_deleted": False})
+    if not rec:
+        raise HTTPException(404, "File not found")
+    data, ct = await asyncio.to_thread(get_object, path)
+    return Response(content=data, media_type=rec.get("content_type", ct), headers={"Cache-Control": "public, max-age=86400"})
+
+
+@api.post("/tokens")
+async def create_token(body: TokenCreate):
+    ch = body.character
+    avatar = await db.avatars.find_one({"id": ch.get("avatarId")}, {"_id": 0})
+    if not avatar:
+        raise HTTPException(400, "Unknown avatar")
+    data = body.model_dump(exclude={"character"})
+    data["ticker"] = body.ticker.upper().lstrip("$")
+    tok = Token(**data, avatarId=avatar["id"])
+    prof = CharacterProfile(tokenId=tok.id, characterName=ch.get("characterName") or tok.name, vibe=ch.get("vibe") if ch.get("vibe") in VIBES else "commander",
+                            traits=ch.get("traits", []), prompt=ch.get("prompt", ""), voice=ch.get("voice") or "am_onyx",
+                            animationProfile=ch.get("animationProfile") or "military", avatarId=avatar["id"], backstory=ch.get("backstory", ""))
+    tok.characterProfileId = prof.id
+    await db.tokens.insert_one(tok.to_mongo())
+    await db.character_profiles.insert_one(prof.to_mongo())
+    return await token_bundle(Token.from_mongo(await db.tokens.find_one({"id": tok.id})).to_mongo())
+
+
+@api.get("/tokens")
+async def list_tokens(q: Optional[str] = None, sort: str = "mcap", limit: int = 40):
+    f = {"status": "live"}
+    if q:
+        f["$or"] = [{"name": {"$regex": re.escape(q), "$options": "i"}}, {"ticker": {"$regex": re.escape(q), "$options": "i"}}]
+    toks = await db.tokens.find(f, {"_id": 0}).to_list(200)
+    out = []
+    for t in toks:
+        b = await token_bundle(t)
+        b["lastEvent"] = t.get("lastEvent")
+        out.append(b)
+    key = {
+        "mcap": lambda b: (b.get("state") or {}).get("marketCap") or 0,
+        "new": lambda b: b["token"].get("launchedAt") or "",
+        "gainers": lambda b: _chg(b),
+        "volume": lambda b: (b.get("state") or {}).get("volume1h") or 0,
+    }.get(sort)
+    if key:
+        out.sort(key=key, reverse=True)
+    return {"items": out[:limit]}
+
+
+def _chg(b):
+    s = b.get("state") or {}
+    if s.get("price") and s.get("price1hAgo"):
+        return s["price"] / s["price1hAgo"] - 1
+    return -9
+
+
+async def find_token(key):
+    t = await db.tokens.find_one({"$or": [{"mint": key}, {"id": key}]}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Token not found")
+    return t
+
+
+@api.get("/tokens/{key}")
+async def get_token(key: str):
+    return await token_bundle(await find_token(key), full=True)
+
+
+@api.patch("/tokens/{key}/character")
+async def update_character(key: str, body: dict):
+    t = await find_token(key)
+    allowed = {k: v for k, v in body.items() if k in ("characterName", "voice", "backstory", "prompt", "vibe", "animationProfile", "avatarId")}
+    if "vibe" in allowed and allowed["vibe"] not in VIBES:
+        raise HTTPException(400, "Unknown vibe")
+    if "avatarId" in allowed:
+        if not await db.avatars.find_one({"id": allowed["avatarId"]}):
+            raise HTTPException(400, "Unknown avatar")
+        await db.tokens.update_one({"id": t["id"]}, {"$set": {"avatarId": allowed["avatarId"]}})
+    await db.character_profiles.update_one({"id": t["characterProfileId"]}, {"$set": allowed})
+    return await token_bundle(await find_token(key))
+
+
+@api.get("/tokens/{key}/metadata.json")
+async def token_metadata(key: str):
+    t = await find_token(key)
+    meta = {"name": t["name"], "symbol": t["ticker"], "description": t["description"], "image": t.get("imageUrl"), "showName": True,
+            "createdOn": "alive", "twitter": t.get("twitter") or None, "telegram": t.get("telegram") or None, "website": t.get("website") or None}
+    return JSONResponse({k: v for k, v in meta.items() if v is not None})
+
+
+@api.get("/tokens/{key}/events")
+async def token_events(key: str, limit: int = 50):
+    t = await find_token(key)
+    return {"items": await db.market_events.find({"mint": t["mint"]}, {"_id": 0}).sort("timestamp", -1).to_list(min(limit, 200))}
+
+
+# ----- launch (PumpLaunchProvider backends) -----
+async def _go_live(t, mint, provider, simulated, signature=None, launch_mcap=None):
+    await db.tokens.update_one({"id": t["id"]}, {"$set": {"mint": mint, "status": "live", "launchProvider": provider, "simulated": simulated,
+                                                           "launchSignature": signature, "launchedAt": iso(), "launchMarketCap": launch_mcap}})
+    await db.character_profiles.update_one({"id": t["characterProfileId"]}, {"$set": {"mint": mint}})
+    t = await find_token(mint)
+    eng = await ensure_engine(t)
+    if simulated:
+        evs = [eng.launch_event()]
+        await hub.emit(mint, evs)
+    return await token_bundle(t, full=True)
+
+
+def _sim_mint(ticker):
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    return "SIM" + re.sub(r"[^A-Za-z0-9]", "", ticker.upper())[:6] + "".join(random.choice(alphabet) for _ in range(26)) + "pump"
+
+
+@api.post("/launch/mock")
+async def launch_mock(body: dict):
+    t = await find_token(body.get("tokenId", ""))
+    if t["status"] == "live":
+        raise HTTPException(400, "Already live")
+    return await _go_live(t, _sim_mint(t["ticker"]), "mock", True, launch_mcap=float(body.get("launchMarketCap") or 30000))
+
+
+@api.post("/launch/pumpportal/prepare")
+async def launch_prepare(body: dict, request: Request):
+    t = await find_token(body.get("tokenId", ""))
+    pk, mint = body.get("publicKey"), body.get("mint")
+    if not pk or not mint:
+        raise HTTPException(400, "publicKey and mint required")
+    if not t.get("imageUrl"):
+        raise HTTPException(400, "Token image required for Pump.fun launch")
+    uri = f"{public_base(request)}/api/tokens/{t['id']}/metadata.json"
+    payload = {"publicKey": pk, "action": "create", "tokenMetadata": {"name": t["name"], "symbol": t["ticker"], "uri": uri},
+               "mint": mint, "denominatedInSol": "true", "amount": float(body.get("devBuySol", 0) or 0), "slippage": int(body.get("slippage", 10)),
+               "priorityFee": float(body.get("priorityFee", 0.0005)), "pool": "pump"}
+    async with httpx.AsyncClient(timeout=25) as c:
+        r = await c.post(PUMPPORTAL_TRADE_LOCAL, json=payload)
+    if r.status_code != 200:
+        raise HTTPException(502, f"PumpPortal error {r.status_code}: {r.text[:200]}")
+    await db.tokens.update_one({"id": t["id"]}, {"$set": {"status": "pending", "pendingMint": mint, "creatorWallet": pk, "launchProvider": "pumpportal"}})
+    return {"tx": base64.b64encode(r.content).decode(), "metadataUri": uri}
+
+
+async def _rpc(method, params):
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.post(SOLANA_RPC_URL, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+        return r.json().get("result")
+
+
+@api.post("/launch/confirm")
+async def launch_confirm(body: dict):
+    t = await find_token(body.get("tokenId", ""))
+    sig, mint = body.get("signature"), body.get("mint")
+    if not sig or not mint:
+        raise HTTPException(400, "signature and mint required")
+    await db.tokens.update_one({"id": t["id"]}, {"$set": {"launchSignature": sig, "pendingMint": mint}})
+    for _ in range(10):
+        res = await _rpc("getSignatureStatuses", [[sig], {"searchTransactionHistory": True}])
+        st = (res or {}).get("value", [None])[0]
+        if st and st.get("err"):
+            await db.tokens.update_one({"id": t["id"]}, {"$set": {"status": "draft"}})
+            raise HTTPException(400, f"Transaction failed: {st['err']}")
+        if st and st.get("confirmationStatus") in ("confirmed", "finalized"):
+            return await _go_live(t, mint, "pumpportal", False, sig)
+        await asyncio.sleep(2)
+    return {"status": "pending", "signature": sig}
+
+
+@api.get("/launch/status/{token_id}")
+async def launch_status(token_id: str):
+    t = await find_token(token_id)
+    if t["status"] == "pending" and t.get("launchSignature"):
+        res = await _rpc("getSignatureStatuses", [[t["launchSignature"]], {"searchTransactionHistory": True}])
+        st = (res or {}).get("value", [None])[0]
+        if st and not st.get("err") and st.get("confirmationStatus") in ("confirmed", "finalized"):
+            await _go_live(t, t["pendingMint"], "pumpportal", False, t["launchSignature"])
+            t = await find_token(token_id)
+    return {"status": t["status"], "mint": t.get("mint"), "pendingMint": t.get("pendingMint"), "signature": t.get("launchSignature")}
+
+
+@api.post("/launch/link")
+async def launch_link(body: dict):
+    """Handoff path: creator launched via official pump.fun UI, then links the resulting mint."""
+    t = await find_token(body.get("tokenId", ""))
+    mint = str(body.get("mint", "")).strip()
+    if not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", mint):
+        raise HTTPException(400, "Invalid mint address")
+    if await db.tokens.find_one({"mint": mint}):
+        raise HTTPException(400, "Mint already linked")
+    acct = await _rpc("getAccountInfo", [mint, {"encoding": "base64", "commitment": "confirmed"}])
+    if not acct or not acct.get("value"):
+        raise HTTPException(400, "Mint account not found on Solana mainnet")
+    return await _go_live(t, mint, "handoff", False)
+
+
+# ----- simulator / lab -----
+LAB_ORDER = []
+
+
+@api.post("/lab/session")
+async def lab_session(body: dict):
+    mint = "LAB" + uuid.uuid4().hex[:20]
+    eng = MarketEngine(mint, await SolPrice.refresh(), float(body.get("marketCap") or 30000))
+    hub.register(eng, simulated=True, autopilot=False)
+    LAB_ORDER.append(mint)
+    while len(LAB_ORDER) > 40:
+        old = LAB_ORDER.pop(0)
+        hub.engines.pop(old, None)
+        hub.sim.pop(old, None)
+    return {"mint": mint, "state": eng.state(), "memory": eng.memory_view(), "history": eng.history_points()}
+
+
+@api.post("/sim/{mint}")
+async def simulate(mint: str, body: dict):
+    if mint not in hub.sim:
+        raise HTTPException(400, "Simulation only allowed on simulated tokens")
+    action = body.get("action")
+    if action == "launch":
+        eng = hub.engines[mint]
+        eng.__init__(mint, eng.sol_usd, float(body.get("value") or 30000))
+        await hub.emit(mint, [eng.launch_event()])
+        return {"ok": True}
+    asyncio.create_task(hub.simulate(mint, action, body.get("value")))
+    return {"ok": True, "action": action}
+
+
+@api.websocket("/ws/{mint}")
+async def ws_endpoint(ws: WebSocket, mint: str):
+    await ws.accept()
+    eng = hub.engine(mint)
+    if not eng:
+        t = await db.tokens.find_one({"mint": mint, "status": "live"}, {"_id": 0})
+        if not t:
+            await ws.send_json({"type": "error", "message": "unknown mint"})
+            await ws.close()
+            return
+        eng = await ensure_engine(t)
+    await hub.join(mint, ws)
+    await ws.send_text(__import__("json").dumps({"type": "hello", "state": eng.state(), "memory": eng.memory_view(), "history": eng.history_points(),
+                                                 "feed": "simulated" if mint in hub.sim else hub.feed_status}, default=str))
+    try:
+        while True:
+            msg = await ws.receive_text()
+            if msg == "ping":
+                await ws.send_text('{"type":"pong"}')
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await hub.leave(mint, ws)
+
+
+app.include_router(api)
+app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])
+
+# ---------------- seed ----------------
+DEMO = [
+    ("LOCKHEED", "LOCK", "commander", "Polybot", "A futuristic military AI commander. Overconfident, dry humor, strategic, slightly unhinged. Treats every trade like a battlefield operation.", 30000, "Commander LOCK"),
+    ("Quant Desk", "DESK", "wallstreet", "Bizdude", "A smug quant who believes every chart is a pitch deck.", 84000, "Chairman DESK"),
+    ("Breaking Pump", "NEWS", "anchor", "StonksReporter", "Round-the-clock coverage of one token and nothing else.", 46000, "NEWS Tonight"),
+    ("Hellfire", "DEVIL", "villain", "Devil", "A theatrical overlord collecting souls one buy at a time.", 132000, "Lord DEVIL"),
+    ("Probe", "PROBE", "alien", "CoolAlien", "A visitor studying human markets with growing confusion.", 22000, "Visitor PROBE"),
+    ("Honkonomics", "HONK", "chaotic", "Clown", "Pure chaos with a ticker.", 61000, "HONK.exe"),
+    ("Root Access", "ROOT", "hacker", "Cyberpal", "Reads the mempool like a diary.", 38000, "ROOT_root"),
+    ("Moonshot Lab", "MOONLAB", "scientist", "Astronaut", "A scientist treating the chart as a live experiment.", 27000, "Dr. MOONLAB"),
+]
+
+
+async def seed():
+    if await db.avatars.count_documents({}) == 0:
+        reg = build_registry()
+        if reg:
+            await db.avatars.insert_many(reg)
+        logger.info(f"Seeded avatar registry: {len(reg)}")
+    await db.avatars.create_index("id", unique=True)
+    await db.avatars.create_index("archetypes")
+    await db.tokens.create_index("mint")
+    await db.market_events.create_index([("mint", 1), ("timestamp", -1)])
+    await db.market_snapshots.create_index([("mint", 1), ("timestamp", -1)])
+    if await db.tokens.count_documents({"simulated": True}) == 0:
+        for name, ticker, vibe, avatar_name, desc, mcap, cname in DEMO:
+            av = await db.avatars.find_one({"name": avatar_name, "collectionId": {"$regex": "^100avatars"}}, {"_id": 0})
+            if not av:
+                continue
+            mint = "SIM" + ticker + "".join(random.choice("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz") for _ in range(24)) + "pump"
+            tok = Token(name=name, ticker=ticker, description=desc, imageUrl=av["thumbnailUrl"], status="live", launchProvider="mock", simulated=True,
+                        mint=mint, avatarId=av["id"], launchMarketCap=mcap, launchedAt=iso())
+            prof = CharacterProfile(tokenId=tok.id, mint=mint, characterName=cname, vibe=vibe, traits=VIBES[vibe]["traits"], prompt=desc,
+                                    voice=VIBES[vibe]["voices"][0], animationProfile=VIBES[vibe]["animation"], avatarId=av["id"],
+                                    backstory=VIBES[vibe]["backstory"].replace("{T}", ticker))
+            tok.characterProfileId = prof.id
+            await db.tokens.insert_one(tok.to_mongo())
+            await db.character_profiles.insert_one(prof.to_mongo())
+    for t in await db.tokens.find({"status": "live", "simulated": True}, {"_id": 0}).to_list(200):
+        await ensure_engine(t)
+
+
+@app.on_event("startup")
+async def startup():
+    try:
+        init_storage()
+    except Exception as e:
+        logger.error(f"Storage init failed: {e}")
+    await seed()
+    asyncio.create_task(hub.autopilot_loop())
+    asyncio.create_task(hub.tick_loop())
+    asyncio.create_task(hub.indexer_loop())
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    client.close()
