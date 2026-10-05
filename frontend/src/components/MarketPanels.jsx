@@ -28,14 +28,14 @@ export function MarketChart({ history, ath }) {
 }
 
 export function StatGrid({ state, memory }) {
-  const chg = pctChange(state?.price, state?.price1hAgo || state?.price5mAgo);
+  const chg = state?.change1h ?? pctChange(state?.price, state?.price1hAgo || state?.price5mAgo);
   const items = [
     ["MARKET CAP", fmtUsd(state?.marketCap), "stat-mcap", "text-white"],
-    ["CHANGE", fmtPct(chg), "stat-change", (chg ?? 0) >= 0 ? "text-[#00e699]" : "text-[#ff2e51]"],
+    ["CHANGE 1H", fmtPct(chg), "stat-change", (chg ?? 0) >= 0 ? "text-[#00e699]" : "text-[#ff2e51]"],
     ["PRICE", fmtPrice(state?.price), "stat-price", "text-slate-200"],
     ["ATH", fmtUsd(state?.athMarketCap), "stat-ath", "text-[#ffb800]"],
     ["VOL 5M", fmtSol(state?.volume5m), "stat-vol5m", "text-slate-200"],
-    ["VOL 1H", fmtSol(state?.volume1h), "stat-vol1h", "text-slate-200"],
+    ["VOL 24H", state?.volume24hUsd != null ? fmtUsd(state.volume24hUsd) : fmtSol(state?.volume1h), "stat-vol24h", "text-slate-200"],
     ["HOLDERS", state?.holderCount ?? "—", "stat-holders", "text-slate-400"],
     ["FROM ATH", memory?.drawdownFromAth ? `-${memory.drawdownFromAth}%` : "0%", "stat-drawdown", "text-slate-300"],
   ];

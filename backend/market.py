@@ -57,6 +57,7 @@ class MarketEngine:
         self.mcap = launch_mcap
         self.holder_count = None
         self.launch_ts = launch_ts or now()
+        self.ext = {}
         m = memory or {}
         self.memory = {
             "launchMarketCap": m.get("launchMarketCap", launch_mcap),
@@ -120,6 +121,8 @@ class MarketEngine:
             "largestBuy5m": self._largest("buy"), "largestSell5m": self._largest("sell"),
             "launchTimestamp": self.launch_ts, "lastUpdated": now(), "solUsd": self.sol_usd,
             "whaleThresholdSol": self.whale_threshold(),
+            "change1h": self.ext.get("change1h"), "change24h": self.ext.get("change24h"),
+            "volume1hUsd": self.ext.get("volume1hUsd"), "volume24hUsd": self.ext.get("volume24hUsd"), "dex": self.ext.get("dex"),
         }
 
     def memory_view(self):

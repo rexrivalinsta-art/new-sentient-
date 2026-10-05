@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SpeechDirector } from "@/brain/SpeechDirector";
 import { voiceEngine } from "@/voice/VoiceEngine";
 import { useWallet } from "@/lib/wallet";
-import { MockPumpLaunchProvider, PumpFunHandoffProvider, PumpPortalLaunchProvider } from "@/launch/pumpLaunch";
+import { PumpFunHandoffProvider, PumpPortalLaunchProvider } from "@/launch/pumpLaunch";
 
 const VIBES = [["commander", "Commander"], ["wallstreet", "Wall Street"], ["chaotic", "Chaotic"], ["villain", "Villain"], ["anime", "Anime"], ["robot", "Robot"],
   ["aristocrat", "Aristocrat"], ["anchor", "News Anchor"], ["hacker", "Hacker"], ["scientist", "Scientist"], ["alien", "Alien"], ["meme", "Meme"], ["random", "Random"]];
@@ -36,10 +36,7 @@ function LaunchDialog({ open, onOpenChange, form, character, imageUrl, onLaunche
     try {
       const tokenId = await ensureDraft();
       let res;
-      if (method === "mock") {
-        setStep("Spawning simulated market…");
-        res = await MockPumpLaunchProvider.launch(await MockPumpLaunchProvider.prepareLaunch({ tokenId }), { launchMarketCap: 30000 });
-      } else if (method === "pumpportal") {
+      if (method === "pumpportal") {
         if (!imageUrl) throw new Error("Pump.fun requires a token image.");
         const pk = publicKey || (await connect());
         setStep("Building create transaction…");
@@ -92,10 +89,9 @@ function LaunchDialog({ open, onOpenChange, form, character, imageUrl, onLaunche
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
           <div>Pump.fun token name, ticker, image and metadata are <b>immutable</b> after launch. Check every character. The AI character profile stays editable here.</div>
         </div>
-        <div className="grid sm:grid-cols-3 gap-2">
+        <div className="grid sm:grid-cols-2 gap-2">
           {opt("pumpportal", "Pump.fun · Wallet", "Server builds the create tx via PumpPortal local API. You sign. Requires image + SOL for fees.")}
           {opt("handoff", "Official Pump.fun", "Create on pump.fun yourself, then paste the mint to bring it alive.")}
-          {opt("mock", "Simulated", "No chain, no cost. Character runs on a simulated market.")}
         </div>
         {method === "pumpportal" && (
           <Field label="OPTIONAL DEV BUY (SOL)">
@@ -115,7 +111,7 @@ function LaunchDialog({ open, onOpenChange, form, character, imageUrl, onLaunche
         </label>
         <button data-testid="confirm-launch-button" disabled={!ack || busy || (method === "handoff" && !mint)} onClick={run}
           className="w-full bg-white text-black py-4 font-display font-black tracking-[0.2em] text-sm disabled:opacity-30 hover:bg-[#00f0ff] transition-colors">
-          {busy ? step || "WORKING…" : method === "mock" ? "LAUNCH SIMULATION" : method === "handoff" ? "LINK & BRING ALIVE" : "LAUNCH ON PUMP.FUN"}
+          {busy ? step || "WORKING…" : method === "handoff" ? "LINK & BRING ALIVE" : "LAUNCH ON PUMP.FUN"}
         </button>
       </DialogContent>
     </Dialog>

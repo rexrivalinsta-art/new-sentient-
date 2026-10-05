@@ -25,7 +25,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 from market import SIGNIFICANT, MarketEngine  # noqa: E402
 from personalities import ANIMATION_PROFILES, VIBES, detect_vibe, pick_name  # noqa: E402
-from providers import Hub, SolPrice, dexscreener_snapshot  # noqa: E402
+from providers import Hub, SolPrice, dexscreener_snapshot, trending_pump_mints  # noqa: E402
 from registry import build_registry  # noqa: E402
 
 client = AsyncIOMotorClient(os.environ["MONGO_URL"])
@@ -215,6 +215,7 @@ async def ensure_engine(token):
         ds = await dexscreener_snapshot(mint)
         if ds and ds.get("marketCap"):
             eng.set_external_state(float(ds["marketCap"]), ds.get("priceUsd"))
+            eng.ext = ds
         hub.register(eng, simulated=False)
     return eng
 
@@ -268,11 +269,11 @@ async def token_bundle(t, full=False):
         profile["vibeLabel"] = VIBES.get(profile["vibe"], {}).get("label")
     out = {"token": t, "profile": profile, "avatar": avatar}
     eng = hub.engine(t["mint"]) if t.get("mint") else None
-    if t.get("mint") and t["status"] == "live" and not eng and full:
+    if t.get("mint") and t["status"] == "live" and not eng:
         eng = await ensure_engine(t)
     if eng:
         st = eng.state()
-        out["state"] = st if full else {k: st[k] for k in ("marketCap", "price", "athMarketCap", "price1hAgo", "price5mAgo", "volume5m", "volume1h", "lastUpdated")}
+        out["state"] = st if full else {k: st[k] for k in ("marketCap", "price", "athMarketCap", "price1hAgo", "price5mAgo", "volume5m", "volume1h", "lastUpdated", "change1h", "change24h", "volume24hUsd")}
         out["memory"] = eng.memory_view()
         if full:
             out["history"] = eng.history_points()
@@ -478,10 +479,7 @@ def _sim_mint(ticker):
 
 @api.post("/launch/mock")
 async def launch_mock(body: dict):
-    t = await find_token(body.get("tokenId", ""))
-    if t["status"] == "live":
-        raise HTTPException(400, "Already live")
-    return await _go_live(t, _sim_mint(t["ticker"]), "mock", True, launch_mcap=float(body.get("launchMarketCap") or 30000))
+    raise HTTPException(410, "Simulated launches are disabled. Launch on Pump.fun or link a real mint.")
 
 
 @api.post("/launch/pumpportal/prepare")
@@ -769,18 +767,6 @@ app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])
 
 # ---------------- seed ----------------
-DEMO = [
-    ("LOCKHEED", "LOCK", "commander", "Polybot", "A futuristic military AI commander. Overconfident, dry humor, strategic, slightly unhinged. Treats every trade like a battlefield operation.", 30000, "Commander LOCK"),
-    ("Quant Desk", "DESK", "wallstreet", "Bizdude", "A smug quant who believes every chart is a pitch deck.", 84000, "Chairman DESK"),
-    ("Breaking Pump", "NEWS", "anchor", "StonksReporter", "Round-the-clock coverage of one token and nothing else.", 46000, "NEWS Tonight"),
-    ("Hellfire", "DEVIL", "villain", "Devil", "A theatrical overlord collecting souls one buy at a time.", 132000, "Lord DEVIL"),
-    ("Probe", "PROBE", "alien", "CoolAlien", "A visitor studying human markets with growing confusion.", 22000, "Visitor PROBE"),
-    ("Honkonomics", "HONK", "chaotic", "Clown", "Pure chaos with a ticker.", 61000, "HONK.exe"),
-    ("Root Access", "ROOT", "hacker", "Cyberpal", "Reads the mempool like a diary.", 38000, "ROOT_root"),
-    ("Moonshot Lab", "MOONLAB", "scientist", "Astronaut", "A scientist treating the chart as a live experiment.", 27000, "Dr. MOONLAB"),
-]
-
-
 async def seed():
     if await db.avatars.count_documents({"collectionId": "vipe-heroes-genesis"}) == 0:
         await db.avatars.delete_many({})
@@ -793,26 +779,39 @@ async def seed():
     await db.tokens.create_index("mint")
     await db.market_events.create_index([("mint", 1), ("timestamp", -1)])
     await db.market_snapshots.create_index([("mint", 1), ("timestamp", -1)])
-    if await db.tokens.count_documents({"simulated": True}) == 0:
-        for name, ticker, vibe, avatar_name, desc, mcap, cname in DEMO:
-            av = (await generate_character(GenerateReq(vibe=vibe, ticker=ticker)))["avatar"]
-            mint = "SIM" + ticker + "".join(random.choice("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz") for _ in range(24)) + "pump"
-            tok = Token(name=name, ticker=ticker, description=desc, imageUrl=av["thumbnailUrl"], status="live", launchProvider="mock", simulated=True,
-                        mint=mint, avatarId=av["id"], launchMarketCap=mcap, launchedAt=iso())
-            prof = CharacterProfile(tokenId=tok.id, mint=mint, characterName=cname, vibe=vibe, traits=VIBES[vibe]["traits"], prompt=desc,
-                                    voice=VIBES[vibe]["voices"][0], animationProfile=VIBES[vibe]["animation"], avatarId=av["id"],
-                                    backstory=VIBES[vibe]["backstory"].replace("{T}", ticker))
-            tok.characterProfileId = prof.id
-            await db.tokens.insert_one(tok.to_mongo())
-            await db.character_profiles.insert_one(prof.to_mongo())
+    for t in await db.tokens.find({"simulated": True}, {"_id": 0}).to_list(500):
+        await db.character_profiles.delete_many({"id": t.get("characterProfileId")})
+        for col in ("market_events", "market_snapshots", "character_memory"):
+            await db[col].delete_many({"mint": t.get("mint")})
+        await db.tokens.delete_one({"id": t["id"]})
     for t in await db.tokens.find({"status": "live"}, {"_id": 0}).to_list(500):
         if not await db.avatars.find_one({"id": t.get("avatarId"), "enabled": True}):
             prof = await db.character_profiles.find_one({"id": t.get("characterProfileId")}) or {}
             av = (await generate_character(GenerateReq(vibe=prof.get("vibe", "commander"), ticker=t["ticker"])))["avatar"]
             await db.tokens.update_one({"id": t["id"]}, {"$set": {"avatarId": av["id"], **({"imageUrl": av["thumbnailUrl"]} if t.get("simulated") else {})}})
             await db.character_profiles.update_one({"id": t.get("characterProfileId")}, {"$set": {"avatarId": av["id"]}})
-    for t in await db.tokens.find({"status": "live", "simulated": True}, {"_id": 0}).to_list(200):
+    for t in await db.tokens.find({"status": "live"}, {"_id": 0}).to_list(300):
         await ensure_engine(t)
+
+
+async def top_up_real_tokens():
+    """Keep the live feed populated with REAL pump.fun tokens (DexScreener trending), each given a character."""
+    while True:
+        try:
+            if await db.tokens.count_documents({"status": "live", "simulated": {"$ne": True}}) < 12:
+                for mint in await trending_pump_mints(16):
+                    if await db.tokens.count_documents({"status": "live"}) >= 12:
+                        break
+                    if await db.tokens.find_one({"mint": mint}):
+                        continue
+                    try:
+                        await import_token({"input": mint, "vibe": "random"})
+                    except HTTPException:
+                        pass
+            await warm_avatar_cache()
+        except Exception as e:
+            logger.warning(f"top up failed: {e}")
+        await asyncio.sleep(1800)
 
 
 async def warm_avatar_cache():
@@ -838,7 +837,7 @@ async def startup():
     asyncio.create_task(hub.autopilot_loop())
     asyncio.create_task(hub.tick_loop())
     asyncio.create_task(hub.indexer_loop())
-    asyncio.create_task(warm_avatar_cache())
+    asyncio.create_task(top_up_real_tokens())
 
 
 @app.on_event("shutdown")

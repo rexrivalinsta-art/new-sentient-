@@ -42,7 +42,7 @@ function HeroStage({ bundle }) {
 
 export default function Home() {
   const items = useTokens({ sort: "mcap" });
-  const featured = items?.find((b) => b.token.ticker === "LOCK") || items?.[0];
+  const featured = items?.[0];
   return (
     <div className="noise relative">
       <section className="max-w-[1600px] mx-auto px-4 md:px-8 pt-10 md:pt-16 grid lg:grid-cols-[1fr_1.15fr] gap-10 lg:gap-14 items-center">

@@ -6,7 +6,7 @@ import { useMemo } from "react";
 /** Livestream-style preview card. Uses lightweight animated thumbnails — no WebGL per card. */
 export function TokenCard({ bundle, index = 0 }) {
   const { token, profile, avatar, state, memory, lastEvent } = bundle;
-  const chg = pctChange(state?.price, state?.price1hAgo || state?.price5mAgo);
+  const chg = state?.change1h ?? pctChange(state?.price, state?.price1hAgo || state?.price5mAgo);
   const caption = useMemo(
     () => captionFor({ ...profile, ticker: token.ticker }, lastEvent, state, memory),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -26,7 +26,7 @@ export function TokenCard({ bundle, index = 0 }) {
           <span data-testid="token-card-live-badge" className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-[#ff2e51] font-mono text-[9px] font-bold tracking-widest text-white">
             <span className="w-1 h-1 rounded-full bg-white live-dot" /> LIVE
           </span>
-          {token.simulated && <span className="px-1.5 py-0.5 bg-black/70 border border-[#ffb800]/40 font-mono text-[9px] tracking-widest text-[#ffb800]">SIM</span>}
+          <span className="px-1.5 py-0.5 bg-black/70 border border-[#00e699]/40 font-mono text-[9px] tracking-widest text-[#00e699]">ON-CHAIN</span>
         </div>
         <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black via-black/70 to-transparent">
           <p className="text-[13px] leading-snug text-slate-200 line-clamp-2 min-h-[2.5em]" data-testid="token-card-subtitle">"{caption}"</p>
@@ -39,7 +39,7 @@ export function TokenCard({ bundle, index = 0 }) {
         </div>
         <div className="text-right font-mono">
           <div className="text-sm text-white" data-testid="token-card-mcap">{fmtUsd(state?.marketCap)}</div>
-          <div className={`text-xs ${up ? "text-[#00e699]" : "text-[#ff2e51]"}`}>{fmtPct(chg)}</div>
+          <div className={`text-xs ${up ? "text-[#00e699]" : "text-[#ff2e51]"}`}>{fmtPct(chg)} <span className="text-slate-600">1H</span></div>
         </div>
       </div>
     </Link>

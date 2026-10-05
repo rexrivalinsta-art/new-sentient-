@@ -32,6 +32,12 @@ Pump.fun-based launchpad where every token is a LIVE AI 3D character (VRM, Three
 - Emotion pose offsets fixed (celebrate arms up etc.)
 - Testing iteration_2: all passing
 
+## Iteration 3 (2026-06) — all real, no simulated tokens
+- Removed all seeded simulated tokens; /api/launch/mock disabled (410); Create launch = Pump.fun wallet-signed or official pump.fun handoff only
+- Feed auto-populated with REAL trending pump.fun tokens (DexScreener free boosts/profiles), each given a character; top-up every 30 min to 12
+- DexScreener batched polling for all real tokens (45s): mcap, 1h/24h change, 24h volume; Solana RPC live trades on viewed tokens
+- Character Lab remains a dev-only simulator (/dev/character-lab)
+
 ## Backlog
 - P1: Kokoro WebGPU path for faster voice on capable desktops; pre-synthesis of queued lines
 - P1: Holder count via free source; PumpSwap trade-level parsing (currently state-level via DexScreener)

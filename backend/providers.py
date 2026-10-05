@@ -227,21 +227,24 @@ class Hub:
                 await self.ingest(mint, self.make_trade(eng, side, sol))
 
     async def indexer_loop(self):
-        """Poll DexScreener for watched real mints (covers PumpSwap after graduation). Ingests state, never trades."""
+        """Poll DexScreener (batched, free API) for ALL real mints: covers PumpSwap after graduation + home feed freshness.
+        Ingests verified price state only, never fabricates trades."""
         while True:
-            await asyncio.sleep(30)
-            for mint in list(self.real):
-                if not self.clients.get(mint):
-                    continue
-                eng = self.engines.get(mint)
-                if not eng or time.time() - eng.last_trade_ts < 25:
-                    continue
-                snap = await dexscreener_snapshot(mint)
-                if snap and snap.get("marketCap"):
+            await asyncio.sleep(45)
+            mints = [m for m in self.real if m in self.engines]
+            for i in range(0, len(mints), 30):
+                snaps = await dexscreener_batch(mints[i:i + 30])
+                for mint, snap in snaps.items():
+                    eng = self.engines.get(mint)
+                    if not eng or not snap.get("marketCap"):
+                        continue
+                    eng.ext = snap
+                    if time.time() - eng.last_trade_ts < 25:
+                        continue
                     evs = eng.apply_price_update(float(snap["marketCap"]), snap.get("priceUsd"))
                     if evs:
                         await self.emit(mint, evs)
-                    else:
+                    elif self.clients.get(mint):
                         await self.broadcast(mint, {"type": "state", "state": eng.state(), "memory": eng.memory_view()})
 
     async def tick_loop(self):
@@ -408,9 +411,46 @@ async def dexscreener_snapshot(mint):
             pairs = (r.json() or {}).get("pairs") or []
             if not pairs:
                 return None
-            p = max(pairs, key=lambda x: (x.get("liquidity") or {}).get("usd") or 0)
-            return {"marketCap": p.get("marketCap") or p.get("fdv"), "priceUsd": float(p.get("priceUsd") or 0) or None,
-                    "dex": p.get("dexId"), "pairAddress": p.get("pairAddress")}
+            return _pair_snapshot(max(pairs, key=lambda x: (x.get("liquidity") or {}).get("usd") or 0))
     except Exception as e:
         log.warning(f"dexscreener failed: {e}")
         return None
+
+
+def _pair_snapshot(p):
+    pc, vol = p.get("priceChange") or {}, p.get("volume") or {}
+    return {"marketCap": p.get("marketCap") or p.get("fdv"), "priceUsd": float(p.get("priceUsd") or 0) or None,
+            "dex": p.get("dexId"), "pairAddress": p.get("pairAddress"), "change1h": pc.get("h1"), "change24h": pc.get("h24"),
+            "volume1hUsd": vol.get("h1"), "volume24hUsd": vol.get("h24")}
+
+
+async def dexscreener_batch(mints):
+    out = {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(DEXSCREENER + ",".join(mints))
+            best = {}
+            for p in (r.json() or {}).get("pairs") or []:
+                m = (p.get("baseToken") or {}).get("address")
+                if m in mints and ((p.get("liquidity") or {}).get("usd") or 0) >= ((best.get(m) or {}).get("liquidity") or {}).get("usd", -1):
+                    best[m] = p
+            out = {m: _pair_snapshot(p) for m, p in best.items()}
+    except Exception as e:
+        log.warning(f"dexscreener batch failed: {e}")
+    return out
+
+
+async def trending_pump_mints(limit=12):
+    """Real, currently-promoted pump.fun mints from DexScreener's free public endpoints."""
+    found = []
+    async with httpx.AsyncClient(timeout=10) as c:
+        for url in ("https://api.dexscreener.com/token-boosts/top/v1", "https://api.dexscreener.com/token-boosts/latest/v1",
+                    "https://api.dexscreener.com/token-profiles/latest/v1"):
+            try:
+                for x in (await c.get(url)).json() or []:
+                    a = x.get("tokenAddress") or ""
+                    if x.get("chainId") == "solana" and a.endswith("pump") and a not in found:
+                        found.append(a)
+            except Exception as e:
+                log.warning(f"trending fetch failed {url}: {e}")
+    return found[:limit]
