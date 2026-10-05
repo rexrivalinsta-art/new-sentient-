@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { detectDevice, qualityPreset } from "@/lib/device";
+import { API } from "@/lib/api";
+
+export const modelUrlFor = (avatar) => (avatar?.id ? `${API}/avatar-files/${encodeURIComponent(avatar.id)}/model` : null);
 
 /** Reusable cinematic VRM stage. Lazy-loads Three.js; falls back to poster on WebGL/VRM failure. */
 export function LiveCharacterStage({ avatar, params, driver, quality, framing = "upper", className = "", children, testid = "live-character-stage" }) {
@@ -39,7 +42,7 @@ export function LiveCharacterStage({ avatar, params, driver, quality, framing = 
       const chk = () => (stage.current || cancelled ? r() : setTimeout(chk, 50));
       chk();
     });
-    wait().then(() => stage.current?.setAvatar(avatar.modelUrl, params, (p) => !cancelled && setProgress(p)))
+    wait().then(() => stage.current?.setAvatar(modelUrlFor(avatar), params, (p) => !cancelled && setProgress(p)))
       .then((vrm) => !cancelled && vrm && setPhase("ready"))
       .catch((e) => {
         console.warn("VRM load failed", e);
@@ -80,6 +83,12 @@ export function LiveCharacterStage({ avatar, params, driver, quality, framing = 
       <div className="absolute inset-0 scanline pointer-events-none opacity-40" />
       <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#050608] to-transparent pointer-events-none" />
       {children}
+      {avatar?.attribution && (
+        <a href={avatar.sourceUrl || "https://vipe.io"} target="_blank" rel="noreferrer" data-testid="avatar-attribution"
+          className="absolute right-3 bottom-2 z-20 font-mono text-[9px] tracking-wider text-slate-500 hover:text-slate-300 max-w-[60%] truncate">
+          AVATAR: {avatar.attribution}
+        </a>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 import logging
 import os
 import random
@@ -317,9 +318,9 @@ async def list_avatars(archetype: Optional[str] = None, q: Optional[str] = None,
 
 @api.get("/avatars/stats")
 async def avatar_stats():
-    pipeline = [{"$group": {"_id": "$collection", "count": {"$sum": 1}, "license": {"$first": "$license"}}}]
+    pipeline = [{"$match": {"enabled": True}}, {"$group": {"_id": "$collection", "count": {"$sum": 1}, "license": {"$first": "$license"}}}]
     cols = await db.avatars.aggregate(pipeline).to_list(50)
-    return {"total": await db.avatars.count_documents({}), "collections": [{"name": c["_id"], "count": c["count"], "license": c["license"]} for c in cols]}
+    return {"total": await db.avatars.count_documents({"enabled": True}), "collections": [{"name": c["_id"], "count": c["count"], "license": c["license"]} for c in cols]}
 
 
 @api.get("/avatars/{avatar_id}")
@@ -613,6 +614,157 @@ async def ws_endpoint(ws: WebSocket, mint: str):
         await hub.leave(mint, ws)
 
 
+# ----- avatar model proxy/cache (IPFS gateways are rate limited; cache once in object storage) -----
+GATEWAYS = ["https://gateway.pinata.cloud/ipfs/", "https://ipfs.io/ipfs/", "https://dweb.link/ipfs/"]
+_avatar_locks = {}
+
+
+@api.get("/avatar-files/{avatar_id}/model")
+async def avatar_model(avatar_id: str):
+    a = await db.avatars.find_one({"id": avatar_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Avatar not found")
+    lock = _avatar_locks.setdefault(avatar_id, asyncio.Lock())
+    async with lock:
+        cached = await db.avatar_cache.find_one({"avatarId": avatar_id})
+        if cached:
+            data, _ = await asyncio.to_thread(get_object, cached["path"])
+        else:
+            url = a["modelUrl"]
+            urls = [g + url.split("/ipfs/", 1)[1] for g in GATEWAYS] if "/ipfs/" in url else [url]
+            data = None
+            async with httpx.AsyncClient(timeout=60, follow_redirects=True) as c:
+                for u in urls:
+                    try:
+                        r = await c.get(u)
+                        if r.status_code == 200 and r.content[:4] == b"glTF":
+                            data = r.content
+                            break
+                    except Exception as e:
+                        logger.warning(f"avatar fetch failed {u}: {e}")
+            if not data:
+                raise HTTPException(502, "Avatar source unavailable")
+            try:
+                res = await asyncio.to_thread(put_object, f"{APP_NAME}/avatars/{avatar_id}.vrm", data, "model/gltf-binary")
+                await db.avatar_cache.insert_one({"avatarId": avatar_id, "path": res["path"], "size": len(data), "createdAt": iso()})
+            except Exception as e:
+                logger.warning(f"avatar cache store failed: {e}")
+    return Response(content=data, media_type="model/gltf-binary", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+# ----- cloud brain (Emergent LLM) : one call per event per token, shared by all viewers -----
+BRAIN_MODEL = ("gemini", os.environ.get("BRAIN_MODEL", "gemini-3.8-flash"))
+BRAIN_SYSTEM = ("You are the live voice of a token's AI character on a livestream. Entertainment commentary only. "
+                "Never invent prices, trades, market cap, holder data, partnerships, listings or events. Only use facts included in EVENT_CONTEXT. "
+                "Never promise profits, never tell anyone to buy or sell, never say returns are guaranteed. "
+                "Rewrite the DRAFT in the character's voice: short, punchy, funny, max 24 words, one or two sentences. Output only the line.")
+BANNED = re.compile(r"guarantee|can'?t go down|cannot go down|buy now|everyone buy|financial advice|risk[- ]free|easy money|partnership|listed on|listing on|\b\d+\s*x\b", re.I)
+_brain_cache = {}
+_brain_last = {}
+
+
+def _numbers_ok(out, allowed_text):
+    allowed = set(re.findall(r"\d+(?:\.\d+)?", allowed_text))
+    return all(n in allowed for n in re.findall(r"\d+(?:\.\d+)?", out))
+
+
+async def _brain_call(body):
+    from emergentintegrations.llm.chat import LlmChat, StreamDone, TextDelta, UserMessage
+    prof = body.get("profile") or {}
+    chat = LlmChat(api_key=os.environ["EMERGENT_LLM_KEY"], session_id=f"brain-{body.get('mint')}-{uuid.uuid4().hex[:6]}",
+                   system_message=BRAIN_SYSTEM).with_model(*BRAIN_MODEL)
+    prompt = (f"CHARACTER: {prof.get('characterName')} | vibe: {prof.get('vibe')} | traits: {', '.join(prof.get('traits') or [])} | ticker ${prof.get('ticker')}\n"
+              f"EVENT_CONTEXT: {json.dumps(body.get('context') or {}, default=str)[:1500]}\nRECENT_LINES: {json.dumps((body.get('recent') or [])[:4])}\nDRAFT: {body.get('draft')}")
+    out = ""
+    async for ev in chat.stream_message(UserMessage(text=prompt)):
+        if isinstance(ev, TextDelta):
+            out += ev.content
+        elif isinstance(ev, StreamDone):
+            break
+    return out.strip().strip('"').split("\n")[0].strip()
+
+
+@api.post("/brain/line")
+async def brain_line(body: dict):
+    draft = str(body.get("draft") or "")[:400]
+    mint, key = body.get("mint") or "", f"{body.get('mint')}:{body.get('eventId')}"
+    if not draft:
+        raise HTTPException(400, "draft required")
+    if key in _brain_cache:
+        return await asyncio.shield(_brain_cache[key])
+    priority = int(body.get("priority") or 0)
+    gap = 4 if priority >= 3 else 12
+    if time.time() - _brain_last.get(mint, 0) < gap:
+        return {"text": draft, "source": "template", "reason": "rate_limited"}
+    _brain_last[mint] = time.time()
+
+    async def run():
+        try:
+            out = await asyncio.wait_for(_brain_call(body), timeout=8)
+        except Exception as e:
+            logger.warning(f"brain failed: {e}")
+            return {"text": draft, "source": "template", "reason": "error"}
+        allowed = draft + " " + json.dumps(body.get("context") or {}, default=str)
+        if not out or len(out) > 220 or BANNED.search(out) or not _numbers_ok(out, allowed):
+            return {"text": draft, "source": "template", "reason": "rejected"}
+        return {"text": out, "source": BRAIN_MODEL[1]}
+
+    fut = asyncio.ensure_future(run())
+    _brain_cache[key] = fut
+    if len(_brain_cache) > 2000:
+        for k in list(_brain_cache)[:500]:
+            _brain_cache.pop(k, None)
+    return await fut
+
+
+@api.get("/brain/info")
+async def brain_info():
+    return {"provider": BRAIN_MODEL[0], "model": BRAIN_MODEL[1]}
+
+
+# ----- bring an existing pump.fun / gmgn / dexscreener token alive -----
+MINT_RE = re.compile(r"[1-9A-HJ-NP-Za-km-z]{32,44}")
+
+
+@api.post("/tokens/import")
+async def import_token(body: dict):
+    m = MINT_RE.findall(str(body.get("input") or ""))
+    if not m:
+        raise HTTPException(400, "Paste a mint address or a pump.fun / gmgn / dexscreener link")
+    mint = max(m, key=len)
+    existing = await db.tokens.find_one({"mint": mint, "status": "live"}, {"_id": 0})
+    if existing:
+        return await token_bundle(existing)
+    info = None
+    async with httpx.AsyncClient(timeout=10) as c:
+        try:
+            pairs = (await c.get(f"https://api.dexscreener.com/latest/dex/tokens/{mint}")).json().get("pairs") or []
+            if pairs:
+                p = pairs[0]
+                bt = p.get("baseToken") or {}
+                if bt.get("address") == mint:
+                    info = {"name": bt.get("name"), "ticker": bt.get("symbol"), "imageUrl": (p.get("info") or {}).get("imageUrl"),
+                            "website": next((w.get("url") for w in (p.get("info") or {}).get("websites") or []), "")}
+        except Exception as e:
+            logger.warning(f"dexscreener import failed: {e}")
+    name = (info or {}).get("name") or body.get("name")
+    ticker = (info or {}).get("ticker") or body.get("ticker")
+    if not name or not ticker:
+        acct = await _rpc("getAccountInfo", [mint, {"encoding": "base64", "commitment": "confirmed"}])
+        if not acct or not acct.get("value"):
+            raise HTTPException(400, "Mint not found on Solana mainnet")
+        raise HTTPException(422, "Token not indexed yet — enter name and ticker")
+    ch = await generate_character(GenerateReq(vibe=body.get("vibe") or "random", prompt=body.get("prompt") or "", ticker=ticker))
+    tok = Token(name=name[:32], ticker=ticker.upper()[:10], imageUrl=(info or {}).get("imageUrl"), website=(info or {}).get("website") or "",
+                avatarId=ch["avatarId"], status="draft")
+    prof = CharacterProfile(tokenId=tok.id, characterName=ch["characterName"], vibe=ch["vibe"], traits=ch["traits"], prompt=ch["prompt"],
+                            voice=ch["voice"], animationProfile=ch["animationProfile"], avatarId=ch["avatarId"], backstory=ch["backstory"])
+    tok.characterProfileId = prof.id
+    await db.tokens.insert_one(tok.to_mongo())
+    await db.character_profiles.insert_one(prof.to_mongo())
+    return await _go_live(tok.to_mongo(), mint, "import", False)
+
+
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","), allow_methods=["*"], allow_headers=["*"])
 
@@ -630,7 +782,8 @@ DEMO = [
 
 
 async def seed():
-    if await db.avatars.count_documents({}) == 0:
+    if await db.avatars.count_documents({"collectionId": "vipe-heroes-genesis"}) == 0:
+        await db.avatars.delete_many({})
         reg = build_registry()
         if reg:
             await db.avatars.insert_many(reg)
@@ -642,9 +795,7 @@ async def seed():
     await db.market_snapshots.create_index([("mint", 1), ("timestamp", -1)])
     if await db.tokens.count_documents({"simulated": True}) == 0:
         for name, ticker, vibe, avatar_name, desc, mcap, cname in DEMO:
-            av = await db.avatars.find_one({"name": avatar_name, "collectionId": {"$regex": "^100avatars"}}, {"_id": 0})
-            if not av:
-                continue
+            av = (await generate_character(GenerateReq(vibe=vibe, ticker=ticker)))["avatar"]
             mint = "SIM" + ticker + "".join(random.choice("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz") for _ in range(24)) + "pump"
             tok = Token(name=name, ticker=ticker, description=desc, imageUrl=av["thumbnailUrl"], status="live", launchProvider="mock", simulated=True,
                         mint=mint, avatarId=av["id"], launchMarketCap=mcap, launchedAt=iso())
@@ -654,8 +805,27 @@ async def seed():
             tok.characterProfileId = prof.id
             await db.tokens.insert_one(tok.to_mongo())
             await db.character_profiles.insert_one(prof.to_mongo())
+    for t in await db.tokens.find({"status": "live"}, {"_id": 0}).to_list(500):
+        if not await db.avatars.find_one({"id": t.get("avatarId"), "enabled": True}):
+            prof = await db.character_profiles.find_one({"id": t.get("characterProfileId")}) or {}
+            av = (await generate_character(GenerateReq(vibe=prof.get("vibe", "commander"), ticker=t["ticker"])))["avatar"]
+            await db.tokens.update_one({"id": t["id"]}, {"$set": {"avatarId": av["id"], **({"imageUrl": av["thumbnailUrl"]} if t.get("simulated") else {})}})
+            await db.character_profiles.update_one({"id": t.get("characterProfileId")}, {"$set": {"avatarId": av["id"]}})
     for t in await db.tokens.find({"status": "live", "simulated": True}, {"_id": 0}).to_list(200):
         await ensure_engine(t)
+
+
+async def warm_avatar_cache():
+    """Pre-cache VRMs used by live tokens + featured avatars so first viewers don't wait on IPFS."""
+    ids = [t["avatarId"] for t in await db.tokens.find({"status": "live"}, {"avatarId": 1}).to_list(200)]
+    ids += [a["id"] for a in await db.avatars.find({"featured": True, "enabled": True}, {"id": 1}).to_list(50)]
+    for aid in dict.fromkeys(ids):
+        if await db.avatar_cache.find_one({"avatarId": aid}):
+            continue
+        try:
+            await avatar_model(aid)
+        except Exception as e:
+            logger.warning(f"warm avatar {aid} failed: {e}")
 
 
 @app.on_event("startup")
@@ -668,6 +838,7 @@ async def startup():
     asyncio.create_task(hub.autopilot_loop())
     asyncio.create_task(hub.tick_loop())
     asyncio.create_task(hub.indexer_loop())
+    asyncio.create_task(warm_avatar_cache())
 
 
 @app.on_event("shutdown")

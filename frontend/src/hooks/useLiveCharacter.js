@@ -29,7 +29,7 @@ export function useLiveCharacter(mint, profile, { autoVoice = true } = {}) {
     },
   });
   const ctx = useRef({});
-  ctx.current = { profile, state: feed.state, memory: feed.memory };
+  ctx.current = { profile, state: feed.state, memory: feed.memory, mint };
 
   useEffect(() => {
     director.getContext = () => ctx.current;

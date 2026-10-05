@@ -50,7 +50,7 @@ export default function CharacterLab() {
     api.labSession(30000).then(setSession).catch((e) => toast.error(errMsg(e)));
     api.avatars({ featured: true, limit: 20 }).then((d) => {
       setAvatars(d.items);
-      setAvatarId((d.items.find((a) => a.name === "Polybot") || d.items[0])?.id);
+      setAvatarId((d.items.find((a) => a.archetype === "commander") || d.items[0])?.id);
     });
     api.vibes().then((d) => setVibes(d));
   }, []);
@@ -62,6 +62,10 @@ export default function CharacterLab() {
     traits: vibeMeta?.traits || [], animationProfile: vibeMeta?.animation, animationParams: vibes.animationProfiles?.[vibeMeta?.animation], vibeLabel: vibeMeta?.label,
   }), [vibe, voice, vibeMeta, vibes]);
   const ai = useLiveCharacter(session?.mint, profile);
+  const [brain, setBrain] = useState("cloud");
+  useEffect(() => {
+    ai.director.brain = brain;
+  }, [brain, ai.director]);
 
   const onVibe = (v) => {
     setVibe(v);
@@ -142,6 +146,15 @@ export default function CharacterLab() {
               <input data-testid="lab-say-input" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Test line for voice + lip sync" className="flex-1 min-w-0 bg-[#0b0d10] border border-[#1e2430] px-2 py-1.5 text-xs outline-none" />
               <button data-testid="lab-say-button" onClick={() => custom && ai.director.say(custom)} className="px-3 border border-[#1e2430] font-mono text-[10px] hover:border-[#00f0ff]">SAY</button>
             </div>
+          </Box>
+          <Box title="BRAIN" testid="lab-brain-panel">
+            <div className="grid grid-cols-3 gap-1">
+              {[["cloud", "CLOUD · GEMINI 3.8"], ["local", "LOCAL AI"], ["template", "TEMPLATES"]].map(([k, l]) => (
+                <button key={k} data-testid={`brain-mode-${k}`} onClick={() => setBrain(k)}
+                  className={`py-2 font-mono text-[9px] tracking-wider border ${brain === k ? "border-[#00f0ff] text-[#00f0ff]" : "border-[#1e2430] text-slate-500"}`}>{l}</button>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500">Cloud brain rewrites each reaction with verified facts only. One call per event per token, shared by all viewers. Falls back to templates.</p>
           </Box>
           <Box title="LOCAL AI ENHANCER" testid="lab-ai-panel">
             <div className="font-mono text-[10px] text-slate-400 space-y-1">

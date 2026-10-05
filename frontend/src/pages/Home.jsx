@@ -59,7 +59,7 @@ export default function Home() {
             <Link to="/dev/character-lab" data-testid="hero-lab-link" className="font-mono text-[11px] tracking-[0.2em] text-slate-400 hover:text-white border-b border-slate-700 pb-1">OPEN CHARACTER LAB</Link>
           </div>
           <div className="mt-14 grid grid-cols-3 max-w-md border-t border-[#161a22] pt-5 font-mono">
-            {[["1,262", "CC0 BODIES"], ["28", "LOCAL VOICES"], ["$0", "AI COST / LINE"]].map(([a, b]) => (
+            {[["3,000", "HD 3D BODIES"], ["28", "LOCAL VOICES"], ["GEMINI 3.8", "LIVE BRAIN"]].map(([a, b]) => (
               <div key={b}><div className="text-xl text-white">{a}</div><div className="text-[9px] tracking-[0.25em] text-slate-500 mt-1">{b}</div></div>
             ))}
           </div>

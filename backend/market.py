@@ -101,11 +101,11 @@ class MarketEngine:
 
     def whale_threshold(self):
         mcap_sol = (self.mcap or 0) / max(self.sol_usd, 1)
-        floor = max(THRESHOLDS["whale_floor_min_sol"], mcap_sol * THRESHOLDS["whale_floor_mcap_pct"])
+        floor = max(THRESHOLDS["whale_floor_min_sol"], min(mcap_sol * THRESHOLDS["whale_floor_mcap_pct"], 25))
         sizes = [t["solAmount"] for t in list(self.trades)[-40:]]
         if len(sizes) >= 8:
             med = statistics.median(sizes)
-            floor = max(floor, med * THRESHOLDS["whale_median_mult"])
+            floor = max(floor, min(med * THRESHOLDS["whale_median_mult"], 60))
         return round(floor, 3)
 
     def state(self):

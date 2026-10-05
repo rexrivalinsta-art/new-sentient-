@@ -37,6 +37,59 @@ def _archetypes_for(name: str, collection: str) -> list:
     return list(dict.fromkeys(tags)) or ["meme"]
 
 
+IPFS_GATEWAY = "https://gateway.pinata.cloud/ipfs/"
+VIPE_RULES = {
+    "Mood": {"Furious": ["villain", "commander"], "Surprised": ["chaotic", "anchor"], "Sleepy": ["meme", "alien"], "Empty": ["robot", "hacker"], "Vibing": ["wallstreet", "anime", "meme"]},
+    "FaceAcc": {"Cyberpunk": ["hacker", "robot"], "Tracker": ["hacker", "robot"], "Gas": ["hacker", "villain"], "Mask": ["hacker", "villain"], "Bug": ["alien", "scientist"],
+                "Formal": ["wallstreet", "aristocrat", "anchor"], "Shades": ["wallstreet"], "Cool": ["wallstreet", "commander"], "Cooler": ["wallstreet"], "Cultist": ["villain"],
+                "Oni": ["villain"], "Scar": ["commander", "villain"], "Cute": ["anime"], "Blush": ["anime"], "Shy": ["anime"], "Heart Patch": ["anime"],
+                "Utopia": ["scientist", "alien"], "Snow": ["alien"], "Plant": ["scientist"], "Punk": ["chaotic"], "Chain n studs": ["chaotic", "villain"]},
+    "Hair": {"Royal": ["aristocrat"], "Sophisticated": ["aristocrat", "anchor"], "Slicked": ["wallstreet", "anchor"], "Shounen": ["anime"], "Anime": ["anime"], "Twintails": ["anime"],
+             "Neko": ["anime", "meme"], "Ninja": ["anime", "commander"], "Headphones": ["hacker", "anchor"], "Audiorabbit": ["hacker"], "Power Hair": ["commander"],
+             "Indomitable": ["commander"], "Meteorite": ["alien"], "Gangster": ["villain", "wallstreet"], "Beanie": ["chaotic", "meme"], "V Cap": ["chaotic", "meme"],
+             "Short": ["anchor", "commander"], "Undercut": ["commander", "hacker"], "Modern": ["anchor", "wallstreet"], "Occult": ["villain", "scientist"], "Bald": ["robot", "commander"]},
+    "Top": {"Demon": ["villain"], "Angel": ["anime"], "Metaverse": ["hacker", "robot"]},
+}
+
+
+def _ipfs(url):
+    return IPFS_GATEWAY + url.split("/ipfs/", 1)[1] if url and "/ipfs/" in url else url
+
+
+def build_vipe(proj) -> list:
+    out, featured_count = [], {}
+    for a in json.loads((DATA_DIR / "vipe-heroes-genesis.json").read_text()):
+        if a.get("format") != "VRM" or not a.get("model_file_url"):
+            continue
+        attrs = {x.get("trait_type"): x.get("value") for x in a["metadata"].get("attributes", [])}
+        arch = []
+        for trait in ("Top", "FaceAcc", "Mood", "Hair"):
+            arch += VIPE_RULES[trait].get(attrs.get(trait), [])
+        arch = list(dict.fromkeys(arch)) or ["meme"]
+        voices = []
+        for x in arch:
+            voices += VIBES.get(x, {}).get("voices", [])
+        views = a["metadata"].get("alternateViews", {})
+        feat = featured_count.get(arch[0], 0) < 2
+        featured_count[arch[0]] = featured_count.get(arch[0], 0) + 1
+        num = int(a["metadata"].get("token_id", 0) or 0)
+        out.append({
+            "id": a["id"].replace("/", "-"), "name": a["name"], "modelUrl": _ipfs(a["model_file_url"]),
+            "thumbnailUrl": _ipfs(views.get("midShot") or a.get("thumbnail_url")), "iconUrl": _ipfs(a.get("thumbnail_url")),
+            "collection": proj["name"], "collectionId": "vipe-heroes-genesis", "license": "CC-BY",
+            "licenseSource": "Embedded VRM meta: licenseName CC_BY, commercialUssageName Allow; registry declares CC-BY",
+            "author": "VIPE / Polygonal Mind",
+            "attribution": f"{a['name']} by VIPE (vipe.io) & Polygonal Mind, licensed CC BY 4.0",
+            "sourceUrl": a["metadata"].get("external_url"),
+            "tags": arch + [v for v in attrs.values() if isinstance(v, str)][:6], "archetype": arch[0], "archetypes": arch,
+            "style": "stylized anime humanoid", "traits": attrs,
+            "animationProfile": VIBES.get(arch[0], {}).get("animation", "relaxed"),
+            "compatibleVoices": list(dict.fromkeys(voices))[:6],
+            "qualityScore": 92 + (num % 7), "featured": feat, "enabled": True,
+        })
+    return out
+
+
 def build_registry() -> list:
     projects = {p["id"]: p for p in json.loads((DATA_DIR / "projects.json").read_text())}
     out = []
@@ -75,4 +128,10 @@ def build_registry() -> list:
                 "featured": bool(featured),
                 "enabled": True,
             })
+    for a in out:
+        a["enabled"] = False  # low-poly legacy catalog kept for reference, disabled (top-quality only)
+        a["featured"] = False
+    proj = projects.get("vipe-heroes-genesis")
+    if proj and proj.get("license") == "CC-BY" and (DATA_DIR / "vipe-heroes-genesis.json").exists():
+        out += build_vipe(proj)
     return out

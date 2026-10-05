@@ -135,8 +135,8 @@ export class StageRenderer {
       top = H * 1.08;
       bottom = -H * 0.02;
     } else {
-      top = H * 1.07;
-      bottom = H * 0.36;
+      top = H * 1.06;
+      bottom = H * 0.4;
     }
     const span = top - bottom;
     const dv = span / 2 / tan;

@@ -122,6 +122,36 @@ function LaunchDialog({ open, onOpenChange, form, character, imageUrl, onLaunche
   );
 }
 
+function ImportExisting() {
+  const nav = useNavigate();
+  const [input, setInput] = useState("");
+  const [vibe, setVibe] = useState("random");
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const b = await api.importToken({ input, vibe });
+      nav(`/token/${b.token.mint}`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="mb-12 border border-[#161a22] bg-[#08090c] p-4" data-testid="import-existing-panel">
+      <div className="font-mono text-[10px] tracking-[0.3em] text-slate-500 mb-2">ALREADY ON PUMP.FUN? BRING IT ALIVE</div>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <input data-testid="import-token-input" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Mint or pump.fun / gmgn / dexscreener link" className={`${inputCls} flex-1`} />
+        <select data-testid="import-vibe-select" value={vibe} onChange={(e) => setVibe(e.target.value)} className="bg-[#0b0d10] border border-[#1e2430] px-2 text-xs font-mono uppercase">
+          {VIBES.map(([id, l]) => <option key={id} value={id}>{l}</option>)}
+        </select>
+        <button data-testid="import-token-button" disabled={!input || busy} onClick={go} className="px-5 py-3 bg-white text-black font-display font-black text-xs tracking-[0.2em] disabled:opacity-30 hover:bg-[#00f0ff]">{busy ? "WAKING…" : "BRING ALIVE"}</button>
+      </div>
+      <p className="mt-2 text-[11px] text-slate-600">Live prices & reactions from Solana RPC (bonding curve) and DexScreener (PumpSwap). No fabricated data.</p>
+    </div>
+  );
+}
+
 export default function Create() {
   const nav = useNavigate();
   const [form, setForm] = useState({ name: "", ticker: "", description: "", website: "", twitter: "", telegram: "" });
@@ -193,6 +223,7 @@ export default function Create() {
   return (
     <div className="max-w-[1600px] mx-auto px-4 md:px-8 pt-10 grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-10">
       <div className="rise">
+        <ImportExisting />
         <div className="font-mono text-[11px] tracking-[0.35em] text-slate-500 mb-3">CREATE / 01</div>
         <h1 className="font-display font-black uppercase text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none mb-10">Give it a body.</h1>
         <div className="space-y-6">

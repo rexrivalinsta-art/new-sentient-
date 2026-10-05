@@ -1,6 +1,7 @@
 import { DialogueEngine } from "@/brain/dialogueEngine";
 import { aiEnhancer } from "@/brain/aiEnhancer";
 import { voiceEngine } from "@/voice/VoiceEngine";
+import { api } from "@/lib/api";
 
 const LOW_WINDOW_MS = 2600;
 const HIGH_MERGE_MS = 380;
@@ -49,6 +50,8 @@ export class SpeechDirector {
     this.muted = false;
     this.synthetic = null;
     this.current = null;
+    this.brain = "cloud";
+    this.recentTexts = [];
   }
 
   setHandlers(h) {
@@ -174,9 +177,18 @@ export class SpeechDirector {
     this.current = item;
     clearTimeout(this.idleT);
     this.setStatus("THINKING");
-    const { profile, state, memory } = this.getContext();
+    const { profile, state, memory, mint } = this.getContext();
     let line = item;
-    if (aiEnhancer.status === "ready") {
+    const facts = Object.fromEntries(Object.entries(item.facts || {}).map(([k, v]) => [k, v.display]));
+    if (this.brain === "cloud" && mint && item.source === "template") {
+      const r = await api.brain({
+        mint, eventId: item.event?.id || `${item.event?.type}-${item.at}`, priority: item.priority, draft: item.text,
+        context: { event: item.event?.type, category: item.category, facts, marketCap: state?.marketCap, athMarketCap: memory?.athMarketCap, minutesSinceLaunch: memory?.minutesSinceLaunch },
+        profile: { characterName: profile?.characterName, vibe: profile?.vibe, traits: profile?.traits, ticker: profile?.ticker },
+        recent: this.recentTexts,
+      }).catch(() => null);
+      if (r?.source && r.source !== "template") line = { ...item, text: r.text, speech: r.text.replace(/\$/g, ""), source: r.source };
+    } else if (this.brain === "local" && aiEnhancer.status === "ready") {
       line = await aiEnhancer.rewrite(item, profile, {
         event: item.event?.type, facts: Object.fromEntries(Object.entries(item.facts || {}).map(([k, v]) => [k, v.display])),
         marketCap: state?.marketCap, ath: memory?.athMarketCap,
@@ -196,6 +208,7 @@ export class SpeechDirector {
     }
     if (this.stopped) return;
     this.setEmotion(line.emotion);
+    this.recentTexts = [line.text, ...this.recentTexts].slice(0, 6);
     this.handlers.onLine?.({ ...line, ts: Date.now(), voiced: !!audio });
     this.speaking = true;
     this.setStatus("SPEAKING");
