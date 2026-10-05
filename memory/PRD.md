@@ -23,6 +23,15 @@ Pump.fun-based launchpad where every token is a LIVE AI 3D character (VRM, Three
 - Verified: real-mint link → live trades via public RPC (tested), PumpPortal create tx builds successfully
 - Testing agent iteration_1: backend 27/27, frontend all flows passing
 
+## Iteration 2 (2026-06)
+- Avatar registry switched to 3,000 VIPE Heroes (CC BY 4.0, full expressions joy/angry/sorrow/fun + visemes); legacy low-poly CC0 collections disabled
+- Backend VRM proxy + object-storage cache (/api/avatar-files/{id}/model), startup pre-warm for live/featured avatars
+- Attribution on stage + identity panel
+- Cloud brain: Emergent LLM gemini-3.8-flash rewrite per event (shared per token, rate-limited, number/integrity validated, template fallback); lab brain selector cloud/local/template
+- Import existing token by mint or pump.fun/gmgn/dexscreener URL (DexScreener metadata + Solana RPC live trades)
+- Emotion pose offsets fixed (celebrate arms up etc.)
+- Testing iteration_2: all passing
+
 ## Backlog
 - P1: Kokoro WebGPU path for faster voice on capable desktops; pre-synthesis of queued lines
 - P1: Holder count via free source; PumpSwap trade-level parsing (currently state-level via DexScreener)

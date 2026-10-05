@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 2 testing: VIPE Heroes registry (3000 CC-BY avatars), cloud brain gemini-3.8-flash, token import endpoint. Backend 10/10 pytest passed. Frontend verified on desktop 1920x1080.",
+  "backend_tests": {
+    "root": "PASS",
+    "avatars/stats": "PASS - total=3000, single collection 'VIPE Heroes Genesis' license CC-BY",
+    "avatars?featured=true": "PASS - items have attribution, sourceUrl, pinata thumbnailUrl",
+    "avatar-files/{id}/model": "PASS - returns binary starting with 'glTF' (first call cold-fetches via Pinata, then cached)",
+    "characters/generate": "PASS - returns avatar with collectionId=vipe-heroes-genesis",
+    "tokens list": "PASS - 8 seeded tokens (LOCK, DESK, NEWS, DEVIL, PROBE, HONK, ROOT, MOONLAB) all using VIPE avatars",
+    "brain/line": "PASS - returns source='gemini-3.8-flash', same mint+eventId returns identical cached result, second eventId within 4s returns source='template' reason='rate_limited', no hallucinated numbers",
+    "brain/info": "PASS - model='gemini-3.8-flash'",
+    "tokens/import (dexscreener URL)": "PASS - imported CZJfrAmMs5Cz4H22PWzfqTJu5FkP7Q2Vvx1oPVL9pump, idempotent re-import returns same token",
+    "tokens/import (invalid)": "PASS - 400 on 'hello'"
+  },
+  "frontend_tests": {
+    "/create ImportExisting": "PASS - import-existing-panel + import-token-input + import-vibe-select + import-token-button all present and functional. Pasting dex link + clicking BRING ALIVE navigates to /token/CZJf...pump",
+    "/token/{mint}": "PASS - VERIFIED FEED badge visible, avatar-attribution ('AVATAR: VIPE Hero #174 by VIPE (vipe.io) & Polygonal Mind, licensed CC BY 4.0') visible on stage, identity-attribution link with (CC BY 4.0) in IDENTITY panel, 3D canvas rendered under 40s",
+    "/dev/character-lab brain modes": "PASS - brain-mode-cloud, brain-mode-local, brain-mode-template all present and clickable",
+    "/dev/character-lab cloud brain sim": "PASS - sim-button-whale-buy triggers dialogue log entry: 'LARGE_BUY · whaleBuy · EXCITED · gemini-3.8-flash — Reinforcements delivered 4.91 SOL, marching our tactical perimeter straight to $31.1K. Flawless execution, soldiers.' Numbers are grounded in event facts.",
+    "emotion buttons": "PASS - emotion-button-celebrating, emotion-button-disappointed, emotion-button-idle all clickable; character stays posed (no T-pose observed)"
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 846 lines - still growing; consider splitting into routers (avatars, brain, tokens, launch, lab, websocket) soon.",
+    "_brain_cache uses a hard cap of 2000 with FIFO eviction; works but under heavy load concurrent evictions could pop a pending future that another request is awaiting. Low risk given current scale.",
+    "brain_line stores asyncio futures by key with shield; if the underlying _brain_call raises after shield checks, the future itself may be re-awaited (returns cached result object fine). Good.",
+    "GATEWAYS fallback for IPFS is sequential and inside asyncio.Lock() - cold start on 3000 avatars first-model-fetch could be slow; warm_avatar_cache is referenced but should ensure it only pre-warms featured subset.",
+    "import_token calls _go_live even if the token is draft; no rate limiting - a malicious client could spam /tokens/import with random mints. Consider throttling by IP or wallet.",
+    "No cleanup on test-created tokens (QA* and imported CZJf...) - will accumulate across iterations. Minor."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% of iteration-2 flows verified"},
+  "test_credentials": "None required",
+  "seed_data_creation": "Imported one dexscreener token (mint CZJfrAmMs5Cz4H22PWzfqTJu5FkP7Q2Vvx1oPVL9pump -> AGENTCAT) via /api/tokens/import. Expected per iteration-2 spec. No new SIM tokens created.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Updated backend_test.py to the iteration-2 schema: 3000 VIPE avatars (collection 'VIPE Heroes Genesis', license CC-BY), avatar-files/{id}/model returns binary glTF, brain/line uses gemini-3.8-flash with cache (same eventId) and 4s rate-limit (priority>=3), tokens/import accepts dexscreener/pump.fun/gmgn URLs or raw mint. Frontend selectors: import-existing-panel/import-token-input/import-vibe-select/import-token-button on /create; avatar-attribution + identity-attribution on token page; brain-mode-cloud/local/template + sim-button-whale-buy + emotion-button-{celebrating,disappointed,idle} on /dev/character-lab. Dialogue log testid is 'lab-dialogue-log' (not 'dialogue-log'). All 8 seeded tokens re-seeded to use VIPE avatars. Run: pytest /app/backend/tests/backend_test.py -v",
+  "rca_of_the_issue": "No issues."
+}

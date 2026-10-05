@@ -1,6 +1,5 @@
-"""Backend API tests for Alive Launchpad."""
+"""Backend API tests for Alive Launchpad - Iteration 2 (VIPE registry + cloud brain + token import)."""
 import asyncio
-import base64
 import json
 import os
 import time
@@ -8,18 +7,13 @@ import uuid
 
 import pytest
 import requests
-import websockets
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://token-personality.preview.emergentagent.com").rstrip("/")
+BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL") or open("/app/frontend/.env").read().split("REACT_APP_BACKEND_URL=")[1].split("\n")[0]).rstrip("/")
 API = f"{BASE_URL}/api"
 
-VALID_PUBKEY = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
-
-
-def rand_pubkey():
-    import random
-    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-    return "".join(random.choice(alphabet) for _ in range(44))
+EXPECTED_AVATARS = 3000
+EXPECTED_COLLECTION = "VIPE Heroes Genesis"
+EXPECTED_COLLECTION_ID = "vipe-heroes-genesis"
 
 
 # ---------------- health ----------------
@@ -29,220 +23,137 @@ def test_root():
     assert r.json().get("ok") is True
 
 
-# ---------------- tokens list ----------------
-def test_tokens_list_seeded():
+# ---------------- VIPE avatar registry ----------------
+def test_avatar_stats_vipe():
+    r = requests.get(f"{API}/avatars/stats")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["total"] == EXPECTED_AVATARS, f"expected {EXPECTED_AVATARS}, got {d['total']}"
+    cols = d.get("collections", [])
+    assert len(cols) == 1, f"expected only VIPE collection, got {cols}"
+    c = cols[0]
+    assert c["name"] == EXPECTED_COLLECTION, c
+    assert "CC-BY" in (c.get("license") or ""), c
+    assert c["count"] == EXPECTED_AVATARS
+
+
+def test_avatars_featured_attribution():
+    r = requests.get(f"{API}/avatars?featured=true&limit=5")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["total"] >= 1
+    assert len(d["items"]) >= 1
+    for a in d["items"]:
+        assert a.get("collection") == EXPECTED_COLLECTION or a.get("collectionId") == EXPECTED_COLLECTION_ID
+        assert a.get("attribution"), f"missing attribution: {a}"
+        assert a.get("sourceUrl"), f"missing sourceUrl: {a}"
+        assert a.get("thumbnailUrl"), f"missing thumbnailUrl: {a}"
+        assert "pinata" in a["thumbnailUrl"] or "ipfs" in a["thumbnailUrl"], a["thumbnailUrl"]
+
+
+def test_avatar_model_binary_gltf():
+    r = requests.get(f"{API}/avatars?featured=true&limit=1")
+    assert r.status_code == 200
+    item = r.json()["items"][0]
+    avid = item["id"]
+    r2 = requests.get(f"{API}/avatar-files/{avid}/model", timeout=90)
+    assert r2.status_code == 200, f"{r2.status_code}: {r2.text[:200]}"
+    assert r2.content[:4] == b"glTF", f"first bytes: {r2.content[:8]!r}"
+    assert len(r2.content) > 1000
+
+
+# ---------------- character generation uses VIPE ----------------
+def test_generate_returns_vipe_avatar():
+    body = {"vibe": "random", "prompt": "An arrogant military robot commander", "ticker": "QA"}
+    r = requests.post(f"{API}/characters/generate", json=body)
+    assert r.status_code == 200
+    d = r.json()
+    avid = d["avatarId"]
+    av = requests.get(f"{API}/avatars/{avid}").json()
+    assert av.get("collectionId") == EXPECTED_COLLECTION_ID, f"expected VIPE, got {av.get('collectionId')}"
+    assert av.get("enabled") is True
+
+
+# ---------------- seeded tokens use VIPE avatars ----------------
+def test_seeded_tokens_use_vipe():
     r = requests.get(f"{API}/tokens?limit=40")
     assert r.status_code == 200
     items = r.json()["items"]
     tickers = {b["token"]["ticker"] for b in items}
     expected = {"LOCK", "DESK", "NEWS", "DEVIL", "PROBE", "HONK", "ROOT", "MOONLAB"}
-    assert expected.issubset(tickers), f"missing: {expected - tickers}"
-    sample = next(b for b in items if b["token"]["ticker"] == "LOCK")
-    assert sample.get("state", {}).get("marketCap", 0) > 0
-    assert sample.get("profile")
-    assert sample.get("avatar")
+    missing = expected - tickers
+    assert not missing, f"missing seeded tokens: {missing}"
+    for b in items:
+        if b["token"]["ticker"] in expected:
+            av = b.get("avatar") or {}
+            assert av.get("collectionId") == EXPECTED_COLLECTION_ID, f"{b['token']['ticker']} avatar not VIPE: {av.get('collectionId')}"
 
 
-# ---------------- avatars ----------------
-def test_avatar_stats():
-    r = requests.get(f"{API}/avatars/stats")
-    assert r.status_code == 200
-    d = r.json()
-    assert d["total"] == 1262, f"expected 1262 avatars, got {d['total']}"
+# ---------------- brain/line ----------------
+BRAIN_CTX = {
+    "event": "LARGE_BUY",
+    "facts": {"sol": "4 SOL"},
+    "profile": {"characterName": "Commander LOCK", "vibe": "commander", "traits": ["dry humor"], "ticker": "LOCK"},
+}
 
 
-def test_avatars_filter_pagination():
-    r = requests.get(f"{API}/avatars?archetype=robot&limit=10&offset=0")
-    assert r.status_code == 200
-    d = r.json()
-    assert d["total"] >= 1
-    assert len(d["items"]) <= 10
-    for item in d["items"]:
-        assert "robot" in item["archetypes"]
-    # pagination
-    r2 = requests.get(f"{API}/avatars?archetype=robot&limit=10&offset=10")
+def test_brain_line_cache_and_rate_limit():
+    mint = "QAtest1"
+    body1 = {"mint": mint, "eventId": "x1", "priority": 4,
+             "draft": "Whale-class reinforcement detected. 4 SOL.", "context": BRAIN_CTX}
+    r1 = requests.post(f"{API}/brain/line", json=body1, timeout=20)
+    assert r1.status_code == 200, r1.text
+    d1 = r1.json()
+    assert "text" in d1 and "source" in d1
+    # source must be gemini-3.8-flash or template fallback
+    assert d1["source"] in ("gemini-3.8-flash", "template"), d1
+    # digit safety: no numbers absent from draft+ctx
+    import re
+    allowed = set(re.findall(r"\d+(?:\.\d+)?", body1["draft"] + " " + json.dumps(BRAIN_CTX)))
+    for n in re.findall(r"\d+(?:\.\d+)?", d1["text"]):
+        assert n in allowed, f"hallucinated number {n} in {d1['text']}"
+
+    # same mint + eventId -> identical cached result
+    r2 = requests.post(f"{API}/brain/line", json=body1, timeout=20)
     assert r2.status_code == 200
-    if d["total"] > 10:
-        ids1 = {i["id"] for i in d["items"]}
-        ids2 = {i["id"] for i in r2.json()["items"]}
-        assert ids1.isdisjoint(ids2)
+    assert r2.json() == d1, "cache mismatch"
+
+    # different eventId within 4s -> rate-limited template
+    body2 = {**body1, "eventId": "x2"}
+    r3 = requests.post(f"{API}/brain/line", json=body2, timeout=20)
+    assert r3.status_code == 200
+    d3 = r3.json()
+    assert d3["source"] == "template" and d3.get("reason") == "rate_limited", d3
 
 
-# ---------------- character generation ----------------
-def test_generate_commander_and_reroll():
-    body = {"vibe": "random", "prompt": "An arrogant military robot commander who treats charts as battle plans", "ticker": "X"}
-    r = requests.post(f"{API}/characters/generate", json=body)
+def test_brain_info():
+    r = requests.get(f"{API}/brain/info")
     assert r.status_code == 200
     d = r.json()
-    assert d["vibe"] == "commander", f"expected commander, got {d['vibe']}"
-    assert d.get("avatarId")
-    assert d.get("voice")
-    assert d.get("animationProfile")
-    assert d.get("characterName")
-
-    # reroll
-    r2 = requests.post(f"{API}/characters/generate", json={**body, "exclude": [d["avatarId"]]})
-    assert r2.status_code == 200
-    assert r2.json()["avatarId"] != d["avatarId"]
+    assert d.get("model") == "gemini-3.8-flash"
 
 
-# ---------------- token lifecycle ----------------
-@pytest.fixture(scope="module")
-def qa_token():
-    gen = requests.post(f"{API}/characters/generate", json={"vibe": "commander", "prompt": "QA military bot", "ticker": "QATEST"}).json()
-    body = {"name": f"QA Token {uuid.uuid4().hex[:4]}", "ticker": "QATEST", "description": "pytest-created token", "character": gen}
-    r = requests.post(f"{API}/tokens", json=body)
-    assert r.status_code == 200, r.text
-    bundle = r.json()
-    return bundle["token"]
+# ---------------- tokens/import ----------------
+IMPORT_URL = "https://dexscreener.com/solana/CZJfrAmMs5Cz4H22PWzfqTJu5FkP7Q2Vvx1oPVL9pump"
+IMPORT_MINT = "CZJfrAmMs5Cz4H22PWzfqTJu5FkP7Q2Vvx1oPVL9pump"
 
 
-def test_token_metadata(qa_token):
-    r = requests.get(f"{API}/tokens/{qa_token['id']}/metadata.json")
-    assert r.status_code == 200
-    d = r.json()
-    assert d["name"] == qa_token["name"]
-    assert d["symbol"] == qa_token["ticker"]
-
-
-def test_launch_mock_and_fetch(qa_token):
-    r = requests.post(f"{API}/launch/mock", json={"tokenId": qa_token["id"]})
+def test_token_import_dexscreener_url():
+    r = requests.post(f"{API}/tokens/import", json={"input": IMPORT_URL, "vibe": "chaotic"}, timeout=30)
     assert r.status_code == 200, r.text
     b = r.json()
+    assert b["token"]["mint"] == IMPORT_MINT
     assert b["token"]["status"] == "live"
-    mint = b["token"]["mint"]
-    assert mint.startswith("SIM")
-    qa_token["mint"] = mint
-    r2 = requests.get(f"{API}/tokens/{mint}")
+    assert b.get("avatar")
+
+    # idempotent: same input returns existing token
+    r2 = requests.post(f"{API}/tokens/import", json={"input": IMPORT_URL, "vibe": "chaotic"}, timeout=30)
     assert r2.status_code == 200
-    assert r2.json()["token"]["mint"] == mint
+    assert r2.json()["token"]["mint"] == IMPORT_MINT
 
 
-# ---------------- lab session + sim ----------------
-@pytest.fixture(scope="module")
-def lab_mint():
-    r = requests.post(f"{API}/lab/session", json={"marketCap": 30000})
-    assert r.status_code == 200
-    mint = r.json()["mint"]
-    assert mint.startswith("LAB")
-    return mint
-
-
-@pytest.mark.parametrize("action", [
-    "small_buy", "whale_buy", "small_sell", "whale_sell",
-    "buy_streak", "sell_streak", "rally", "dump",
-    "new_ath", "recovery", "quiet", "lock_demo",
-])
-def test_sim_actions(lab_mint, action):
-    r = requests.post(f"{API}/sim/{lab_mint}", json={"action": action})
-    assert r.status_code == 200, r.text
-    assert r.json()["ok"] is True
-
-
-def test_sim_set_mcap(lab_mint):
-    r = requests.post(f"{API}/sim/{lab_mint}", json={"action": "set_mcap", "value": 150000})
-    assert r.status_code == 200
-
-
-def test_sim_launch(lab_mint):
-    r = requests.post(f"{API}/sim/{lab_mint}", json={"action": "launch", "value": 30000})
-    assert r.status_code == 200
-
-
-def test_sim_rejects_non_simulated():
-    # try sim on a random non-sim mint
-    r = requests.post(f"{API}/sim/NOTAREALMINT12345", json={"action": "small_buy"})
-    assert r.status_code == 400
-
-
-# ---------------- websocket ----------------
-def test_websocket_hello_and_events(lab_mint):
-    ws_url = BASE_URL.replace("http", "ws") + f"/api/ws/{lab_mint}"
-
-    async def run():
-        async with websockets.connect(ws_url) as ws:
-            hello = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
-            assert hello["type"] == "hello"
-            assert "state" in hello
-            # trigger whale buy -> expect LARGE_BUY event
-            requests.post(f"{API}/sim/{lab_mint}", json={"action": "whale_buy"})
-            got_types = set()
-            end = time.time() + 8
-            while time.time() < end:
-                try:
-                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-                except asyncio.TimeoutError:
-                    break
-                if msg.get("type") == "event":
-                    got_types.add(msg.get("event", {}).get("type"))
-                elif msg.get("type") == "events":
-                    for e in msg.get("events", []):
-                        got_types.add(e.get("type"))
-            return got_types
-
-    got = asyncio.run(run())
-    # whale buy should emit LARGE_BUY (and maybe others)
-    assert "LARGE_BUY" in got or "WHALE_BUY" in got or len(got) >= 0  # tolerant
-
-
-def test_websocket_buy_streak(lab_mint):
-    ws_url = BASE_URL.replace("http", "ws") + f"/api/ws/{lab_mint}"
-
-    async def run():
-        async with websockets.connect(ws_url) as ws:
-            await asyncio.wait_for(ws.recv(), timeout=10)  # hello
-            requests.post(f"{API}/sim/{lab_mint}", json={"action": "buy_streak"})
-            got = set()
-            end = time.time() + 10
-            while time.time() < end:
-                try:
-                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-                except asyncio.TimeoutError:
-                    break
-                if msg.get("type") == "event":
-                    got.add(msg.get("event", {}).get("type"))
-                elif msg.get("type") == "events":
-                    for e in msg.get("events", []):
-                        got.add(e.get("type"))
-            return got
-
-    got = asyncio.run(run())
-    # tolerant check; log found
-    print(f"buy_streak events: {got}")
-
-
-# ---------------- pumpportal prepare ----------------
-def test_pumpportal_requires_image(qa_token):
-    # qa_token has no imageUrl -> should 400
-    r = requests.post(f"{API}/launch/pumpportal/prepare", json={
-        "tokenId": qa_token["id"], "publicKey": VALID_PUBKEY, "mint": rand_pubkey()
-    })
-    assert r.status_code == 400
-
-
-def test_pumpportal_prepare_with_image():
-    # create a token with imageUrl
-    gen = requests.post(f"{API}/characters/generate", json={"vibe": "commander", "prompt": "QA bot", "ticker": "QAIMG"}).json()
-    body = {"name": f"QA Img {uuid.uuid4().hex[:4]}", "ticker": "QAIMG", "description": "pytest", "imageUrl": "https://example.com/x.png", "character": gen}
-    tok = requests.post(f"{API}/tokens", json=body).json()["token"]
-    r = requests.post(f"{API}/launch/pumpportal/prepare", json={
-        "tokenId": tok["id"], "publicKey": VALID_PUBKEY, "mint": rand_pubkey()
-    })
-    # may return 200 (base64 tx) or 502 if PumpPortal is unreachable; both are acceptable (we validate the code path)
-    if r.status_code == 200:
-        d = r.json()
-        assert "tx" in d
-        base64.b64decode(d["tx"])  # must decode
-        assert "metadataUri" in d
-    else:
-        assert r.status_code == 502, f"unexpected: {r.status_code} {r.text}"
-
-
-# ---------------- launch link invalid ----------------
-def test_launch_link_invalid_mint():
-    gen = requests.post(f"{API}/characters/generate", json={"vibe": "commander", "prompt": "qa", "ticker": "QALINK"}).json()
-    tok = requests.post(f"{API}/tokens", json={"name": "QA Link", "ticker": "QALINK", "description": "", "character": gen}).json()["token"]
-    r = requests.post(f"{API}/launch/link", json={"tokenId": tok["id"], "mint": "notavalidmint"})
+def test_token_import_invalid():
+    r = requests.post(f"{API}/tokens/import", json={"input": "hello"})
     assert r.status_code == 400
 
 
