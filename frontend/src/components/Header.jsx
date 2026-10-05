@@ -3,7 +3,7 @@ import { useWallet } from "@/lib/wallet";
 import { shortAddr } from "@/lib/format";
 import { toast } from "sonner";
 
-const nav = [["/explore", "Explore"], ["/create", "Create"], ["/dev/character-lab", "Character Lab"]];
+const nav = [["/how-it-works", "How It Works"], ["/explore", "Explore"], ["/create", "Create"], ["/dev/character-lab", "Character Lab"]];
 
 export function Header() {
   const { publicKey, connect, disconnect, walletName } = useWallet();
@@ -18,10 +18,13 @@ export function Header() {
   return (
     <header className="fixed top-0 inset-x-0 z-50 h-14 bg-[#050608]/85 backdrop-blur-md border-b border-[#14181f]">
       <div className="h-full max-w-[1600px] mx-auto px-4 md:px-8 flex items-center justify-between">
-        <Link to="/" data-testid="nav-logo" className="flex items-center gap-2.5">
-          <span className="w-2 h-2 bg-[#ff2e51] live-dot" />
-          <span className="font-display font-black tracking-tight text-base">SENTIPAD<span className="text-slate-500">.FUN</span></span>
-        </Link>
+        <div className="flex items-center gap-3 min-w-0">
+          <Link to="/" data-testid="nav-logo" className="flex items-center gap-2.5">
+            <span className="w-2 h-2 bg-[#ff2e51] live-dot" />
+            <span className="font-display font-black tracking-tight text-base">SENTIPAD<span className="text-slate-500">.FUN</span></span>
+          </Link>
+          <span data-testid="header-tagline" className="hidden lg:inline-block pl-3 border-l border-[#1e2430] font-mono text-[10px] tracking-[0.3em] text-slate-500 uppercase">Every token is sentient</span>
+        </div>
         <nav className="hidden md:flex items-center gap-8">
           {nav.map(([to, label]) => (
             <NavLink key={to} to={to} data-testid={`nav-${label.toLowerCase().replace(/\s/g, "-")}`}

@@ -7,6 +7,7 @@ import Create from "@/pages/Create";
 import TokenPage from "@/pages/TokenPage";
 import Explore from "@/pages/Explore";
 import CharacterLab from "@/pages/CharacterLab";
+import HowItWorks from "@/pages/HowItWorks";
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
               <Route path="/create" element={<Create />} />
               <Route path="/token/:mint" element={<TokenPage />} />
               <Route path="/explore" element={<Explore />} />
+              <Route path="/how-it-works" element={<HowItWorks />} />
               <Route path="/dev/character-lab" element={<CharacterLab />} />
             </Routes>
           </main>

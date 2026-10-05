@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Upload, Sparkles, AlertTriangle, ExternalLink } from "lucide-react";
+import { Upload, Sparkles, AlertTriangle, ExternalLink, Coins } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { LiveCharacterStage } from "@/components/LiveCharacterStage";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -112,13 +112,19 @@ function LaunchDialog({ open, onOpenChange, form, character, imageUrl, onLaunche
           <div>Pump.fun token name, ticker, image and metadata are <b>immutable</b> after launch. Check every character. The AI brain can be changed later; body and voice are permanent.</div>
         </div>
         <div className="grid sm:grid-cols-2 gap-2">
-          {opt("pumpportal", "Pump.fun · Wallet", "Server builds the create tx via PumpPortal local API. You sign. Requires image + SOL for fees.")}
-          {opt("handoff", "Official Pump.fun", "Create on pump.fun yourself, then paste the mint to bring it alive.")}
+          {opt("pumpportal", "Pump.fun · Wallet", "Free to launch — 0 SOL dev buy, no balance needed beyond Solana's tiny network fee. Server builds the create tx; you sign. Image required.")}
+          {opt("handoff", "Official Pump.fun", "Create on pump.fun yourself (also free), then paste the mint to bring it alive.")}
         </div>
         {method === "pumpportal" && (
-          <Field label="OPTIONAL DEV BUY (SOL)">
+          <Field label="OPTIONAL DEV BUY (SOL)" hint="0 = FREE LAUNCH">
             <input data-testid="dev-buy-input" type="number" min="0" step="0.01" value={devBuy} onChange={(e) => setDevBuy(e.target.value)} className={inputCls} />
           </Field>
+        )}
+        {method === "pumpportal" && (
+          <div className="flex gap-3 p-3 border border-[#00e699]/30 bg-[#00e699]/5 text-[#00e699] text-xs" data-testid="creator-fee-note">
+            <Coins size={16} className="shrink-0 mt-0.5" />
+            <div>You sign from your own wallet, so <b>you are the on-chain creator</b>. The token shows under your wallet and you keep <b>100% of Pump.fun creator rewards</b>. SENTIPAD takes no fee and adds no referral.</div>
+          </div>
         )}
         {method === "handoff" && (
           <div className="space-y-3">

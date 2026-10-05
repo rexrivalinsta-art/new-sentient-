@@ -72,7 +72,7 @@ export default function Home() {
             <Link to="/create" data-testid="hero-create-cta" className="group inline-flex items-center gap-3 bg-white text-black px-8 py-4 font-display font-black tracking-[0.2em] text-sm hover:bg-[#00f0ff] transition-colors">
               CREATE <ArrowUpRight size={18} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
             </Link>
-            <Link to="/dev/character-lab" data-testid="hero-lab-link" className="font-mono text-[11px] tracking-[0.2em] text-slate-400 hover:text-white border-b border-slate-700 pb-1">OPEN CHARACTER LAB</Link>
+            <Link to="/how-it-works" data-testid="hero-how-link" className="font-mono text-[11px] tracking-[0.2em] text-slate-400 hover:text-white border-b border-slate-700 pb-1">SEE HOW IT WORKS</Link>
           </div>
           <div className="mt-14 grid grid-cols-3 max-w-md border-t border-[#161a22] pt-5 font-mono">
             {[["3,000", "HD 3D BODIES"], ["28", "LOCAL VOICES"], ["GPT · CLAUDE · GEMINI", "CHOOSE THE BRAIN"]].map(([a, b]) => (

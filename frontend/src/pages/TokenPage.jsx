@@ -41,6 +41,13 @@ function LiveToken({ bundle }) {
                 <a href={`https://pump.fun/coin/${token.mint}`} target="_blank" rel="noreferrer" data-testid="pumpfun-link" className="inline-flex items-center gap-1 text-[#00f0ff]">PUMP.FUN <ExternalLink size={11} /></a>
               )}
             </div>
+            {token.creatorWallet && (
+              <div className="font-mono text-[10px] text-slate-500 mt-1 flex items-center gap-1.5" data-testid="token-creator">
+                <span className="text-slate-600">CREATOR</span>
+                <a href={`https://solscan.io/account/${token.creatorWallet}`} target="_blank" rel="noreferrer" className="text-[#00e699] hover:underline">{shortAddr(token.creatorWallet)}</a>
+                <span className="text-slate-600">· keeps 100% creator rewards</span>
+              </div>
+            )}
           </div>
         </div>
         {token.simulated && (
