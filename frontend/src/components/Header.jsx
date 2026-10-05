@@ -20,7 +20,7 @@ export function Header() {
       <div className="h-full max-w-[1600px] mx-auto px-4 md:px-8 flex items-center justify-between">
         <Link to="/" data-testid="nav-logo" className="flex items-center gap-2.5">
           <span className="w-2 h-2 bg-[#ff2e51] live-dot" />
-          <span className="font-display font-black tracking-tight text-base">ALIVE<span className="text-slate-500">.FUN</span></span>
+          <span className="font-display font-black tracking-tight text-base">SENTIPAD<span className="text-slate-500">.FUN</span></span>
         </Link>
         <nav className="hidden md:flex items-center gap-8">
           {nav.map(([to, label]) => (

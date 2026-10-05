@@ -312,7 +312,7 @@ def public_base(request: Request):
 # ---------------- routes ----------------
 @api.get("/")
 async def root():
-    return {"ok": True, "service": "alive-launchpad"}
+    return {"ok": True, "service": "sentipad-launchpad"}
 
 
 @api.get("/vibes")

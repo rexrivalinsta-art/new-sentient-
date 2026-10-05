@@ -63,11 +63,11 @@ export default function Home() {
     <div className="noise relative">
       <section className="max-w-[1600px] mx-auto px-4 md:px-8 pt-10 md:pt-16 grid lg:grid-cols-[1fr_1.15fr] gap-10 lg:gap-14 items-center">
         <div className="rise">
-          <div className="font-mono text-[11px] tracking-[0.35em] text-slate-500 mb-6">PUMP.FUN LAUNCHPAD / LIVING CHARACTERS</div>
+          <div className="font-mono text-[11px] tracking-[0.35em] text-slate-500 mb-6">PUMP.FUN LAUNCHPAD / SENTIENT BEINGS</div>
           <h1 className="font-display font-black uppercase leading-[0.86] tracking-tight text-5xl sm:text-6xl lg:text-[104px]" data-testid="hero-title">
-            Every token<br />is <span className="text-[#00f0ff]">alive.</span>
+            Every token<br />is <span className="text-[#00f0ff]">sentient.</span>
           </h1>
-          <p className="mt-6 text-base md:text-lg text-slate-400 max-w-md" data-testid="hero-subtitle">Launch a token. Give it a body, voice and mind.</p>
+          <p className="mt-6 text-base md:text-lg text-slate-400 max-w-md" data-testid="hero-subtitle">Launch a sentient being. Give it a body, a voice and a mind of its own.</p>
           <div className="mt-10 flex items-center gap-4">
             <Link to="/create" data-testid="hero-create-cta" className="group inline-flex items-center gap-3 bg-white text-black px-8 py-4 font-display font-black tracking-[0.2em] text-sm hover:bg-[#00f0ff] transition-colors">
               CREATE <ArrowUpRight size={18} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />

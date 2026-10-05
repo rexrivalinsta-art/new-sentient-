@@ -25,7 +25,7 @@ function App() {
           </main>
           <footer className="border-t border-[#13161d] mt-24 px-4 md:px-8 py-8 max-w-[1600px] mx-auto font-mono text-[10px] tracking-widest text-slate-600 flex flex-col md:flex-row justify-between gap-2">
             <span>CHARACTERS ARE ENTERTAINMENT. NOT FINANCIAL ADVICE. COMMENTARY USES VERIFIED MARKET DATA ONLY.</span>
-            <span>ALIVE.FUN · LIVING TOKEN CHARACTERS · LOCAL VOICE · REAL-TIME 3D</span>
+            <span>SENTIPAD.FUN · LAUNCHPAD FOR SENTIENT BEINGS · LOCAL VOICE · REAL-TIME 3D</span>
           </footer>
         </div>
         <Toaster theme="dark" position="bottom-right" />

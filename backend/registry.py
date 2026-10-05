@@ -76,9 +76,9 @@ def build_vipe(proj) -> list:
         out.append({
             "id": a["id"].replace("/", "-"), "name": a["name"].replace("VIPE Hero", "Hero").replace("VIPE", "").strip(), "modelUrl": _ipfs(a["model_file_url"]),
             "thumbnailUrl": _ipfs(views.get("midShot") or a.get("thumbnail_url")), "iconUrl": _ipfs(a.get("thumbnail_url")),
-            "collection": "ALIVE Originals", "collectionId": "vipe-heroes-genesis", "license": "",
+            "collection": "SENTIPAD Originals", "collectionId": "vipe-heroes-genesis", "license": "",
             "licenseSource": "Embedded VRM meta: licenseName CC_BY, commercialUssageName Allow; registry declares CC-BY",
-            "author": "ALIVE.FUN",
+            "author": "SENTIPAD.FUN",
             "attribution": "",
             "sourceUrl": None,
             "tags": arch + [v for v in attrs.values() if isinstance(v, str)][:6], "archetype": arch[0], "archetypes": arch,
