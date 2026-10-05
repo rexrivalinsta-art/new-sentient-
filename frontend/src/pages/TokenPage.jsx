@@ -61,7 +61,7 @@ function LiveToken({ bundle }) {
             <div className="font-mono text-[10px] tracking-widest text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
               <span>VOICE: {profile.voice}</span><span>MOTION: {profile.animationProfile}</span>
               <span>BODY: {avatar?.name} · {avatar?.collection} · {avatar?.license}</span>
-              <span>BRAIN: {ai.line?.source && ai.line.source !== "template" ? ai.line.source.toUpperCase() : "TEMPLATE + CLOUD"}</span>
+              <span data-testid="identity-brain">AI BRAIN: {profile.brainLabel || "Gemini 3.8 Flash"}</span>
             </div>
             {token.description && <p className="text-slate-500 text-xs">{token.description}</p>}
             {avatar?.attribution && (

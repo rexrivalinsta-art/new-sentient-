@@ -69,7 +69,7 @@ export function LiveCharacterStage({ avatar, params, driver, quality, framing = 
           <img src={avatar.thumbnailUrl} alt={avatar.name} data-testid="stage-poster" className={`h-[70%] object-contain poster-breathe ${phase === "loading" ? "opacity-30 blur-[1px]" : "opacity-90"}`} />
         </div>
       )}
-      {phase === "loading" && (
+      {phase === "loading" && avatar && (
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-56 text-center" data-testid="stage-loading">
           <div className="font-mono text-[10px] tracking-[0.3em] text-slate-400 mb-2">MATERIALIZING BODY {Math.round(progress * 100)}%</div>
           <div className="h-px bg-[#1e2430]"><div className="h-px bg-[#00f0ff] transition-[width] duration-300" style={{ width: `${Math.max(4, progress * 100)}%` }} /></div>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Upload, Dices, Sparkles, AlertTriangle, ExternalLink } from "lucide-react";
+import { Upload, Sparkles, AlertTriangle, ExternalLink } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { LiveCharacterStage } from "@/components/LiveCharacterStage";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,8 +11,29 @@ import { voiceEngine } from "@/voice/VoiceEngine";
 import { useWallet } from "@/lib/wallet";
 import { PumpFunHandoffProvider, PumpPortalLaunchProvider } from "@/launch/pumpLaunch";
 
-const VIBES = [["commander", "Commander"], ["wallstreet", "Wall Street"], ["chaotic", "Chaotic"], ["villain", "Villain"], ["anime", "Anime"], ["robot", "Robot"],
-  ["aristocrat", "Aristocrat"], ["anchor", "News Anchor"], ["hacker", "Hacker"], ["scientist", "Scientist"], ["alien", "Alien"], ["meme", "Meme"], ["random", "Random"]];
+function useBrainModels() {
+  const [models, setModels] = useState([]);
+  useEffect(() => {
+    api.brainModels().then((d) => setModels(d.models)).catch(() => {});
+  }, []);
+  return models;
+}
+
+export function BrainPicker({ value, onChange, compact = false, prefix = "" }) {
+  const models = useBrainModels();
+  return (
+    <div className={`grid gap-1.5 ${compact ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2 sm:grid-cols-3"}`} data-testid={`${prefix}brain-model-picker`}>
+      {models.map((m) => (
+        <button key={m.id} type="button" disabled={!m.available} data-testid={`${prefix}brain-model-${m.id}`} onClick={() => onChange(m.id)}
+          className={`text-left px-3 py-2.5 border transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${value === m.id ? "border-[#00f0ff] bg-[#00f0ff]/5" : "border-[#1e2430] hover:border-slate-500"}`}>
+          <div className="font-mono text-[9px] tracking-[0.2em] text-slate-500">{m.family.toUpperCase()}</div>
+          <div className="font-display font-bold text-sm mt-0.5">{m.label}</div>
+          {!m.available && <div className="font-mono text-[9px] text-slate-500 mt-0.5">{m.note}</div>}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const Field = ({ label, children, hint }) => (
   <label className="block">
@@ -82,12 +103,13 @@ function LaunchDialog({ open, onOpenChange, form, character, imageUrl, onLaunche
             <div className="truncate"><span className="text-slate-500">DESC </span>{form.description || "—"}</div>
             <div className="truncate"><span className="text-slate-500">LINKS </span>{[form.website, form.twitter, form.telegram].filter(Boolean).join(" · ") || "—"}</div>
             <div><span className="text-slate-500">PAIR </span>SOL (bonding curve)</div>
-            <div><span className="text-slate-500">CHARACTER </span>{character?.characterName} · {character?.avatar?.name}</div>
+            <div><span className="text-slate-500">CHARACTER </span>{character?.characterName} · {character?.avatar?.name} · {character?.voice}</div>
+            <div><span className="text-slate-500">AI BRAIN </span>{character?.brainLabel}</div>
           </div>
         </div>
         <div className="flex gap-3 p-3 border border-[#ffb800]/40 bg-[#ffb800]/5 text-[#ffb800] text-xs" data-testid="immutable-warning">
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-          <div>Pump.fun token name, ticker, image and metadata are <b>immutable</b> after launch. Check every character. The AI character profile stays editable here.</div>
+          <div>Pump.fun token name, ticker, image and metadata are <b>immutable</b> after launch. Check every character. The AI brain can be changed later; body and voice are permanent.</div>
         </div>
         <div className="grid sm:grid-cols-2 gap-2">
           {opt("pumpportal", "Pump.fun · Wallet", "Server builds the create tx via PumpPortal local API. You sign. Requires image + SOL for fees.")}
@@ -121,12 +143,12 @@ function LaunchDialog({ open, onOpenChange, form, character, imageUrl, onLaunche
 function ImportExisting() {
   const nav = useNavigate();
   const [input, setInput] = useState("");
-  const [vibe, setVibe] = useState("random");
+  const [brain, setBrain] = useState("gemini-3.8-flash");
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true);
     try {
-      const b = await api.importToken({ input, vibe });
+      const b = await api.importToken({ input, brainModel: brain });
       nav(`/token/${b.token.mint}`);
     } catch (e) {
       toast.error(errMsg(e));
@@ -138,12 +160,10 @@ function ImportExisting() {
       <div className="font-mono text-[10px] tracking-[0.3em] text-slate-500 mb-2">ALREADY ON PUMP.FUN? BRING IT ALIVE</div>
       <div className="flex flex-col sm:flex-row gap-2">
         <input data-testid="import-token-input" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Mint or pump.fun / gmgn / dexscreener link" className={`${inputCls} flex-1`} />
-        <select data-testid="import-vibe-select" value={vibe} onChange={(e) => setVibe(e.target.value)} className="bg-[#0b0d10] border border-[#1e2430] px-2 text-xs font-mono uppercase">
-          {VIBES.map(([id, l]) => <option key={id} value={id}>{l}</option>)}
-        </select>
         <button data-testid="import-token-button" disabled={!input || busy} onClick={go} className="px-5 py-3 bg-white text-black font-display font-black text-xs tracking-[0.2em] disabled:opacity-30 hover:bg-[#00f0ff]">{busy ? "WAKING…" : "BRING ALIVE"}</button>
       </div>
-      <p className="mt-2 text-[11px] text-slate-600">Live prices & reactions from Solana RPC (bonding curve) and DexScreener (PumpSwap). No fabricated data.</p>
+      <div className="mt-3"><BrainPicker value={brain} onChange={setBrain} compact prefix="import-" /></div>
+      <p className="mt-2 text-[11px] text-slate-600">Body, voice and personality are assigned automatically. Live prices & reactions from Solana RPC (bonding curve) and DexScreener (PumpSwap). No fabricated data.</p>
     </div>
   );
 }
@@ -151,20 +171,19 @@ function ImportExisting() {
 export default function Create() {
   const nav = useNavigate();
   const [form, setForm] = useState({ name: "", ticker: "", description: "", website: "", twitter: "", telegram: "" });
-  const [vibe, setVibe] = useState("commander");
-  const [prompt, setPrompt] = useState("");
+  const [brain, setBrain] = useState("gemini-3.8-flash");
   const [image, setImage] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [character, setCharacter] = useState(null);
-  const [seen, setSeen] = useState([]);
-  const [generating, setGenerating] = useState(false);
+  const [assigning, setAssigning] = useState(false);
   const [launchOpen, setLaunchOpen] = useState(false);
-  const [draftId, setDraftId] = useState(null);
+  const [draft, setDraft] = useState(null);
   const fileRef = useRef();
   const director = useMemo(() => new SpeechDirector(), []);
   const ctx = useRef({});
   const [line, setLine] = useState(null);
   ctx.current = { profile: character ? { ...character, ticker: form.ticker.toUpperCase() } : null };
+  const draftKey = JSON.stringify([form, brain, image?.url]);
 
   useEffect(() => {
     director.getContext = () => ctx.current;
@@ -180,36 +199,34 @@ export default function Create() {
     try {
       const r = await api.upload(f);
       setImage({ preview: URL.createObjectURL(f), url: r.url, path: r.path });
-      setDraftId(null);
     } catch (e) {
       toast.error(errMsg(e));
     }
     setUploading(false);
   };
 
-  const generate = async (reroll = false) => {
-    setGenerating(true);
-    try {
-      const exclude = reroll && character ? [...seen, character.avatarId] : [];
-      const c = await api.generate({ vibe, prompt, ticker: form.ticker || form.name || "TOKEN", exclude });
-      setCharacter(c);
-      setSeen(exclude);
-      setDraftId(null);
-      director.say(`I am ${c.characterName}. ${c.backstory.split(". ")[0]}.`, "SMUG");
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
-    setGenerating(false);
-  };
-
+  // Platform assigns a unique body, voice and personality; the creator only picks the AI brain.
   const ensureDraft = async () => {
-    if (draftId) return draftId;
-    const b = await api.createToken({ ...form, ticker: form.ticker.toUpperCase(), imageUrl: image?.url, imagePath: image?.path, character });
-    setDraftId(b.token.id);
+    if (draft?.key === draftKey) return draft.id;
+    const b = await api.createToken({ ...form, ticker: form.ticker.toUpperCase(), imageUrl: image?.url, imagePath: image?.path, brainModel: brain });
+    setDraft({ id: b.token.id, key: draftKey });
+    setCharacter({ ...b.profile, avatar: b.avatar });
+    director.say(`I am ${b.profile.characterName}. ${b.profile.backstory.split(". ")[0]}.`, "SMUG");
     return b.token.id;
   };
 
-  const canLaunch = form.name && form.ticker && character;
+  const openLaunch = async () => {
+    setAssigning(true);
+    try {
+      await ensureDraft();
+      setLaunchOpen(true);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+    setAssigning(false);
+  };
+
+  const canLaunch = form.name && form.ticker;
   const previewVoice = () => {
     voiceEngine.unlock();
     voiceEngine.init().then(() => director.say(`I am ${character.characterName}. Systems are online.`, "SPEAKING")).catch(() => toast.error("Voice unavailable on this device. Subtitles still work."));
@@ -221,7 +238,7 @@ export default function Create() {
       <div className="rise">
         <ImportExisting />
         <div className="font-mono text-[11px] tracking-[0.35em] text-slate-500 mb-3">CREATE / 01</div>
-        <h1 className="font-display font-black uppercase text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none mb-10">Give it a body.</h1>
+        <h1 className="font-display font-black uppercase text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none mb-10">Give it a mind.</h1>
         <div className="space-y-6">
           <div className="grid grid-cols-[1fr_160px] gap-4">
             <Field label="TOKEN NAME" hint={`${form.name.length}/32`}><input data-testid="token-name-input" maxLength={32} value={form.name} onChange={set("name")} placeholder="LOCKHEED" className={inputCls} /></Field>
@@ -241,61 +258,39 @@ export default function Create() {
               <input data-testid="token-telegram-input" value={form.telegram} onChange={set("telegram")} placeholder="Telegram (optional)" className={inputCls} />
             </div>
           </div>
-          <Field label="CHARACTER VIBE">
-            <div className="flex flex-wrap gap-1.5">
-              {VIBES.map(([id, l]) => (
-                <button key={id} type="button" data-testid={`vibe-chip-${id}`} onClick={() => setVibe(id)}
-                  className={`px-3 py-2 font-mono text-[11px] tracking-wider uppercase border transition-colors ${vibe === id ? "bg-white text-black border-white" : "border-[#1e2430] text-slate-400 hover:border-slate-500"}`}>{l}</button>
-              ))}
-            </div>
-          </Field>
-          <Field label="DESCRIBE YOUR CHARACTER">
-            <textarea data-testid="character-prompt-input" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} className={inputCls}
-              placeholder="An arrogant military robot that treats every trade like a battlefield operation." />
-          </Field>
-          <div className="flex flex-wrap gap-3">
-            <button data-testid="generate-character-button" onClick={() => generate(false)} disabled={generating}
-              className="inline-flex items-center gap-2 bg-white text-black px-6 py-3.5 font-display font-black tracking-[0.18em] text-sm hover:bg-[#00f0ff] transition-colors disabled:opacity-40">
-              <Sparkles size={16} /> {generating ? "SEARCHING REGISTRY…" : "GENERATE CHARACTER"}
-            </button>
-            {character && (
-              <button data-testid="reroll-character-button" onClick={() => generate(true)} disabled={generating}
-                className="inline-flex items-center gap-2 border border-[#1e2430] hover:border-slate-400 px-5 py-3.5 font-mono text-xs tracking-widest transition-colors"><Dices size={15} /> REROLL CHARACTER</button>
-            )}
-          </div>
+          <Field label="AI BRAIN"><BrainPicker value={brain} onChange={setBrain} /></Field>
+          <p className="text-xs text-slate-500 leading-relaxed" data-testid="auto-assign-note">
+            The 3D body, voice and personality are assigned automatically by the platform. Every launch gets a different mix and they can't be picked or rerolled.
+          </p>
         </div>
       </div>
 
       <div className="lg:sticky lg:top-20 self-start space-y-4 rise" style={{ animationDelay: "100ms" }}>
         <LiveCharacterStage avatar={character?.avatar} params={character?.animationParams} driver={() => director.frame()} className="h-[520px] md:h-[600px] border border-[#161a22]" testid="create-preview-stage">
-          {!character && <div className="absolute inset-0 flex items-center justify-center font-mono text-[11px] tracking-[0.3em] text-slate-600 z-10">NO BODY ASSIGNED</div>}
+          {!character && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-10 text-center px-6">
+              <Sparkles size={18} className="text-slate-600" />
+              <div className="font-mono text-[11px] tracking-[0.3em] text-slate-500">BODY + VOICE ASSIGNED AT LAUNCH</div>
+              <div className="font-mono text-[10px] text-slate-600">Unique mix from 3,000 HD avatars and 28 voices</div>
+            </div>
+          )}
           {character && (
             <div className="absolute inset-x-0 top-0 p-5 z-10 flex justify-between items-start">
               <div>
-                <span className="px-2 py-1 border border-[#00f0ff]/40 font-mono text-[10px] tracking-[0.2em] text-[#00f0ff]">PREVIEW</span>
+                <span className="px-2 py-1 border border-[#00f0ff]/40 font-mono text-[10px] tracking-[0.2em] text-[#00f0ff]">ASSIGNED</span>
                 <div className="font-display font-black uppercase text-3xl mt-3 leading-none" data-testid="preview-character-name">{character.characterName}</div>
-                <div className="font-mono text-xs text-slate-400 mt-1">${(form.ticker || "TICKER").toUpperCase()} / {character.vibeLabel}</div>
+                <div className="font-mono text-xs text-slate-400 mt-1">${(form.ticker || "TICKER").toUpperCase()} / {character.vibeLabel} / {character.brainLabel}</div>
               </div>
               <button data-testid="preview-voice-button" onClick={previewVoice} className="font-mono text-[10px] tracking-widest border border-[#1e2430] bg-black/50 px-3 py-2 hover:border-[#00f0ff]/50">PREVIEW VOICE</button>
             </div>
           )}
-          {line && <p key={line.ts} className="rise absolute bottom-6 inset-x-6 z-10 font-display font-semibold text-lg md:text-xl">{line.text}</p>}
+          {line && <p key={line.ts} className="rise absolute bottom-8 inset-x-6 z-10 font-display font-semibold text-lg md:text-xl">{line.text}</p>}
         </LiveCharacterStage>
-        {character && (
-          <div className="border border-[#161a22] p-4 grid grid-cols-2 gap-3 font-mono text-[11px]" data-testid="character-summary">
-            <div><span className="text-slate-500">BODY </span>{character.avatar.name}</div>
-            <div><span className="text-slate-500">LICENSE </span>{character.avatar.license} · {character.avatar.collection}</div>
-            <div><span className="text-slate-500">VOICE </span>{character.voice}</div>
-            <div><span className="text-slate-500">MOTION </span>{character.animationProfile}</div>
-            <div className="col-span-2 text-slate-400 font-sans text-sm">{character.backstory}</div>
-            <div className="col-span-2 text-slate-600">TRAITS: {character.traits.join(" · ")} · CANDIDATES SCANNED: {character.analysis.candidates}</div>
-          </div>
-        )}
-        <button data-testid="open-launch-dialog-button" disabled={!canLaunch} onClick={() => setLaunchOpen(true)}
+        <button data-testid="open-launch-dialog-button" disabled={!canLaunch || assigning} onClick={openLaunch}
           className="w-full py-5 bg-[#00f0ff] text-black font-display font-black tracking-[0.25em] disabled:opacity-25 disabled:bg-slate-700 hover:bg-white transition-colors">
-          LAUNCH TOKEN
+          {assigning ? "ASSIGNING CHARACTER…" : "LAUNCH TOKEN"}
         </button>
-        {!canLaunch && <div className="font-mono text-[10px] tracking-widest text-slate-600 text-center">NAME + TICKER + CHARACTER REQUIRED</div>}
+        {!canLaunch && <div className="font-mono text-[10px] tracking-widest text-slate-600 text-center">NAME + TICKER REQUIRED</div>}
       </div>
       <LaunchDialog open={launchOpen} onOpenChange={setLaunchOpen} form={form} character={character} imageUrl={image?.url} ensureDraft={ensureDraft} onLaunched={(m) => nav(`/token/${m}`)} />
     </div>

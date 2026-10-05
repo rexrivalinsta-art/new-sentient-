@@ -109,6 +109,7 @@ class CharacterProfile(BaseDocument):
     animationProfile: str
     avatarId: str
     backstory: str = ""
+    brainModel: str = "gemini-3.8-flash"
     createdAt: str = Field(default_factory=iso)
 
 
@@ -147,7 +148,7 @@ class TokenCreate(BaseModel):
     website: str = ""
     pair: str = "SOL"
     creatorWallet: Optional[str] = None
-    character: dict
+    brainModel: str = "gemini-3.8-flash"
 
 
 class GenerateReq(BaseModel):
@@ -222,8 +223,22 @@ async def ensure_engine(token):
 
 
 # ---------------- character generation ----------------
-async def generate_character(req: GenerateReq):
+async def _least_used(field, options, rng):
+    counts = {o: 0 for o in options}
+    async for d in db.character_profiles.aggregate([{"$match": {field: {"$in": options}}}, {"$group": {"_id": f"${field}", "n": {"$sum": 1}}}]):
+        counts[d["_id"]] = d["n"]
+    low = min(counts.values())
+    return rng.choice([o for o, n in counts.items() if n == low])
+
+
+async def generate_character(req: GenerateReq, unique=False):
     rng = random.Random()
+    if unique:
+        guessed = detect_vibe(None, req.prompt, random.Random(0))
+        hit = any(k in (req.prompt or "").lower() for k in VIBES[guessed]["keywords"])
+        vibe = guessed if hit and rng.random() < 0.6 else await _least_used("vibe", list(VIBES), rng)
+        used = [p["avatarId"] for p in await db.character_profiles.find({}, {"avatarId": 1}).to_list(5000)]
+        req = GenerateReq(vibe=vibe, prompt=req.prompt, ticker=req.ticker, exclude=list(set(req.exclude) | set(used)))
     vibe = detect_vibe(req.vibe if req.vibe and req.vibe != "random" else None, req.prompt, rng)
     meta = VIBES[vibe]
     words = set(re.findall(r"[a-z]{3,}", req.prompt.lower()))
@@ -244,6 +259,7 @@ async def generate_character(req: GenerateReq):
     if not avatar:
         raise HTTPException(503, "Avatar registry empty")
     voices = [v for v in meta["voices"] if v in avatar["compatibleVoices"]] or meta["voices"]
+    voice = await _least_used("voice", voices, rng) if unique else rng.choice(voices)
     t = (req.ticker or "TOKEN").upper().lstrip("$")
     return {
         "characterName": pick_name(vibe, t, rng),
@@ -251,7 +267,7 @@ async def generate_character(req: GenerateReq):
         "vibeLabel": meta["label"],
         "traits": meta["traits"],
         "prompt": req.prompt,
-        "voice": rng.choice(voices),
+        "voice": voice,
         "animationProfile": meta["animation"],
         "animationParams": ANIMATION_PROFILES[meta["animation"]],
         "avatarId": avatar["id"],
@@ -268,6 +284,7 @@ async def token_bundle(t, full=False):
     if profile:
         profile["animationParams"] = ANIMATION_PROFILES.get(profile["animationProfile"])
         profile["vibeLabel"] = VIBES.get(profile["vibe"], {}).get("label")
+        profile["brainLabel"] = BRAIN_MODELS.get(profile.get("brainModel") or DEFAULT_BRAIN, {}).get("label")
     out = {"token": t, "profile": profile, "avatar": avatar}
     eng = hub.engine(t["mint"]) if t.get("mint") else None
     if t.get("mint") and t["status"] == "live" and not eng:
@@ -373,18 +390,25 @@ async def files(path: str):
     return Response(content=data, media_type=rec.get("content_type", ct), headers={"Cache-Control": "public, max-age=86400"})
 
 
+def _check_brain(key):
+    if not BRAIN_MODELS.get(key, {}).get("available"):
+        raise HTTPException(400, f"AI model unavailable: {key}")
+
+
+def _profile_from(ch, tok_id, brain):
+    return CharacterProfile(tokenId=tok_id, characterName=ch["characterName"], vibe=ch["vibe"], traits=ch["traits"], prompt=ch.get("prompt", ""),
+                            voice=ch["voice"], animationProfile=ch["animationProfile"], avatarId=ch["avatarId"], backstory=ch["backstory"], brainModel=brain)
+
+
 @api.post("/tokens")
 async def create_token(body: TokenCreate):
-    ch = body.character
-    avatar = await db.avatars.find_one({"id": ch.get("avatarId")}, {"_id": 0})
-    if not avatar:
-        raise HTTPException(400, "Unknown avatar")
-    data = body.model_dump(exclude={"character"})
+    """Body + voice + personality are assigned by the platform (unique mix); creator only picks the AI brain."""
+    _check_brain(body.brainModel)
+    data = body.model_dump(exclude={"brainModel"})
     data["ticker"] = body.ticker.upper().lstrip("$")
-    tok = Token(**data, avatarId=avatar["id"])
-    prof = CharacterProfile(tokenId=tok.id, characterName=ch.get("characterName") or tok.name, vibe=ch.get("vibe") if ch.get("vibe") in VIBES else "commander",
-                            traits=ch.get("traits", []), prompt=ch.get("prompt", ""), voice=ch.get("voice") or "am_onyx",
-                            animationProfile=ch.get("animationProfile") or "military", avatarId=avatar["id"], backstory=ch.get("backstory", ""))
+    ch = await generate_character(GenerateReq(vibe="random", prompt=f"{body.name} {body.description}", ticker=data["ticker"]), unique=True)
+    tok = Token(**data, avatarId=ch["avatarId"])
+    prof = _profile_from(ch, tok.id, body.brainModel)
     tok.characterProfileId = prof.id
     await db.tokens.insert_one(tok.to_mongo())
     await db.character_profiles.insert_one(prof.to_mongo())
@@ -435,7 +459,10 @@ async def get_token(key: str):
 @api.patch("/tokens/{key}/character")
 async def update_character(key: str, body: dict):
     t = await find_token(key)
-    allowed = {k: v for k, v in body.items() if k in ("characterName", "voice", "backstory", "prompt", "vibe", "animationProfile", "avatarId")}
+    allowed = {k: v for k, v in body.items() if k in ("brainModel",)}
+    if "brainModel" in allowed:
+        _check_brain(allowed["brainModel"])
+        _mint_brain.pop(t.get("mint"), None)
     if "vibe" in allowed and allowed["vibe"] not in VIBES:
         raise HTTPException(400, "Unknown vibe")
     if "avatarId" in allowed:
@@ -652,7 +679,27 @@ async def avatar_model(avatar_id: str):
 
 
 # ----- cloud brain (Emergent LLM) : one call per event per token, shared by all viewers -----
-BRAIN_MODEL = ("gemini", os.environ.get("BRAIN_MODEL", "gemini-3.8-flash"))
+BRAIN_MODELS = {
+    "gpt-6-astra": {"provider": "openai", "model": "gpt-6-astra", "label": "GPT-6 Astra", "family": "OpenAI", "available": True},
+    "gpt-6-luna": {"provider": "openai", "model": "gpt-6-luna", "label": "GPT-6 Luna", "family": "OpenAI", "available": True},
+    "claude-sonnet-5-5": {"provider": "anthropic", "model": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "family": "Anthropic", "available": True},
+    "claude-opus-5-5": {"provider": "anthropic", "model": "claude-opus-5-5", "label": "Claude Opus 5.5", "family": "Anthropic", "available": True},
+    "gemini-3.1-pro-preview": {"provider": "gemini", "model": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro", "family": "Google", "available": True},
+    "gemini-3.8-flash": {"provider": "gemini", "model": "gemini-3.8-flash", "label": "Gemini 3.8 Flash", "family": "Google", "available": True},
+    "grok": {"provider": "xai", "model": "grok", "label": "Grok", "family": "xAI", "available": False, "note": "Requires an xAI API key"},
+}
+DEFAULT_BRAIN = os.environ.get("BRAIN_MODEL", "gemini-3.8-flash")
+BRAIN_MODEL = (BRAIN_MODELS[DEFAULT_BRAIN]["provider"], DEFAULT_BRAIN)
+_mint_brain = {}
+
+
+async def brain_for_mint(mint):
+    if mint not in _mint_brain:
+        prof = await db.character_profiles.find_one({"mint": mint}, {"brainModel": 1}) if mint and not mint.startswith("LAB") else None
+        key = (prof or {}).get("brainModel") or DEFAULT_BRAIN
+        _mint_brain[mint] = key if BRAIN_MODELS.get(key, {}).get("available") else DEFAULT_BRAIN
+    m = BRAIN_MODELS[_mint_brain[mint]]
+    return m["provider"], m["model"]
 BRAIN_SYSTEM = ("You are the live voice of a token's AI character on a livestream. Entertainment commentary only. "
                 "Never invent prices, trades, market cap, holder data, partnerships, listings or events. Only use facts included in EVENT_CONTEXT. "
                 "Never promise profits, never tell anyone to buy or sell, never say returns are guaranteed. "
@@ -667,11 +714,11 @@ def _numbers_ok(out, allowed_text):
     return all(n in allowed for n in re.findall(r"\d+(?:\.\d+)?", out))
 
 
-async def _brain_call(body):
+async def _brain_call(body, model):
     from emergentintegrations.llm.chat import LlmChat, StreamDone, TextDelta, UserMessage
     prof = body.get("profile") or {}
     chat = LlmChat(api_key=os.environ["EMERGENT_LLM_KEY"], session_id=f"brain-{body.get('mint')}-{uuid.uuid4().hex[:6]}",
-                   system_message=BRAIN_SYSTEM).with_model(*BRAIN_MODEL)
+                   system_message=BRAIN_SYSTEM).with_model(*model)
     prompt = (f"CHARACTER: {prof.get('characterName')} | vibe: {prof.get('vibe')} | traits: {', '.join(prof.get('traits') or [])} | ticker ${prof.get('ticker')}\n"
               f"EVENT_CONTEXT: {json.dumps(body.get('context') or {}, default=str)[:1500]}\nRECENT_LINES: {json.dumps((body.get('recent') or [])[:4])}\nDRAFT: {body.get('draft')}")
     out = ""
@@ -697,16 +744,18 @@ async def brain_line(body: dict):
         return {"text": draft, "source": "template", "reason": "rate_limited"}
     _brain_last[mint] = time.time()
 
+    model = await brain_for_mint(mint)
+
     async def run():
         try:
-            out = await asyncio.wait_for(_brain_call(body), timeout=8)
+            out = await asyncio.wait_for(_brain_call(body, model), timeout=12)
         except Exception as e:
             logger.warning(f"brain failed: {e}")
             return {"text": draft, "source": "template", "reason": "error"}
         allowed = draft + " " + json.dumps(body.get("context") or {}, default=str)
         if not out or len(out) > 220 or BANNED.search(out) or not _numbers_ok(out, allowed):
             return {"text": draft, "source": "template", "reason": "rejected"}
-        return {"text": out, "source": BRAIN_MODEL[1]}
+        return {"text": out, "source": model[1]}
 
     fut = asyncio.ensure_future(run())
     _brain_cache[key] = fut
@@ -716,9 +765,9 @@ async def brain_line(body: dict):
     return await fut
 
 
-@api.get("/brain/info")
-async def brain_info():
-    return {"provider": BRAIN_MODEL[0], "model": BRAIN_MODEL[1]}
+@api.get("/brain/models")
+async def brain_models():
+    return {"default": DEFAULT_BRAIN, "models": [{"id": k, **v} for k, v in BRAIN_MODELS.items()]}
 
 
 # ----- bring an existing pump.fun / gmgn / dexscreener token alive -----
@@ -753,11 +802,12 @@ async def import_token(body: dict):
         if not acct or not acct.get("value"):
             raise HTTPException(400, "Mint not found on Solana mainnet")
         raise HTTPException(422, "Token not indexed yet — enter name and ticker")
-    ch = await generate_character(GenerateReq(vibe=body.get("vibe") or "random", prompt=body.get("prompt") or "", ticker=ticker))
+    brain = body.get("brainModel") or DEFAULT_BRAIN
+    _check_brain(brain)
+    ch = await generate_character(GenerateReq(vibe="random", prompt=name, ticker=ticker), unique=True)
     tok = Token(name=name[:32], ticker=ticker.upper()[:10], imageUrl=(info or {}).get("imageUrl"), website=(info or {}).get("website") or "",
                 avatarId=ch["avatarId"], status="draft", importedBy="user")
-    prof = CharacterProfile(tokenId=tok.id, characterName=ch["characterName"], vibe=ch["vibe"], traits=ch["traits"], prompt=ch["prompt"],
-                            voice=ch["voice"], animationProfile=ch["animationProfile"], avatarId=ch["avatarId"], backstory=ch["backstory"])
+    prof = _profile_from(ch, tok.id, brain)
     tok.characterProfileId = prof.id
     await db.tokens.insert_one(tok.to_mongo())
     await db.character_profiles.insert_one(prof.to_mongo())

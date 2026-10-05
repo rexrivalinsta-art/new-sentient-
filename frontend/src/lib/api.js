@@ -27,7 +27,7 @@ export const api = {
   launchStatus: (tokenId) => http.get(`/launch/status/${tokenId}`).then((r) => r.data),
   launchLink: (tokenId, mint) => http.post("/launch/link", { tokenId, mint }).then((r) => r.data),
   brain: (body) => http.post("/brain/line", body, { timeout: 10000 }).then((r) => r.data),
-  brainInfo: () => http.get("/brain/info").then((r) => r.data),
+  brainModels: () => http.get("/brain/models").then((r) => r.data),
   importToken: (body) => http.post("/tokens/import", body, { timeout: 30000 }).then((r) => r.data),
   wallet: (wallet) => http.post("/users/wallet", { wallet }).catch(() => null),
 };
