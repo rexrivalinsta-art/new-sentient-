@@ -17,7 +17,7 @@ function Registry() {
   return (
     <div data-testid="avatar-registry">
       <div className="flex flex-wrap gap-2 mb-4 font-mono text-[10px] tracking-widest text-slate-500">
-        {stats?.collections.map((c) => <span key={c.name} className="border border-[#161a22] px-2 py-1">{c.name} · {c.count} · {c.license}</span>)}
+        {stats?.collections.map((c) => <span key={c.name} className="border border-[#161a22] px-2 py-1">{c.name} · {c.count}</span>)}
       </div>
       <div className="flex flex-wrap gap-1 mb-4">
         {ARCH.map((a) => (
@@ -32,7 +32,7 @@ function Registry() {
               {a.thumbnailUrl && <img src={a.thumbnailUrl} alt={a.name} loading="lazy" className="h-full object-contain" />}
             </div>
             <div className="mt-1.5 text-[11px] truncate">{a.name}</div>
-            <div className="font-mono text-[9px] text-slate-500 truncate uppercase">{a.archetype} · {a.license}</div>
+            <div className="font-mono text-[9px] text-slate-500 truncate uppercase">{a.archetype}</div>
           </div>
         ))}
       </div>

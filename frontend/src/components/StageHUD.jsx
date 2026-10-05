@@ -62,7 +62,7 @@ export function StageHUD({ name, ticker, vibe, ai, compact = false }) {
           )}
         </div>
         <div className="mt-3 flex items-center gap-3 font-mono text-[10px] tracking-widest text-slate-500">
-          <span data-testid="voice-status">VOICE: {voice.status === "ready" ? (live ? (muted ? "MUTED" : "KOKORO · LOCAL") : "READY · LOCKED") : voice.status === "loading" ? `LOADING ${Math.round(voice.progress * 100)}%` : voice.status === "error" ? "UNAVAILABLE · SUBTITLES" : "STANDBY"}</span>
+          <span data-testid="voice-status">VOICE: {voice.status === "ready" ? (live ? (muted ? "MUTED" : "LOCAL") : "READY · LOCKED") : voice.status === "loading" ? `LOADING ${Math.round(voice.progress * 100)}%` : voice.status === "error" ? "UNAVAILABLE · SUBTITLES" : "STANDBY"}</span>
         </div>
       </div>
     </>

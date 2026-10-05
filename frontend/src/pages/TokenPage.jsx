@@ -60,15 +60,10 @@ function LiveToken({ bundle }) {
             <p>{profile.backstory}</p>
             <div className="font-mono text-[10px] tracking-widest text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
               <span>VOICE: {profile.voice}</span><span>MOTION: {profile.animationProfile}</span>
-              <span>BODY: {avatar?.name} · {avatar?.collection} · {avatar?.license}</span>
+              <span>BODY: {avatar?.name}</span>
               <span data-testid="identity-brain">AI BRAIN: {profile.brainLabel || "Gemini 3.8 Flash"}</span>
             </div>
             {token.description && <p className="text-slate-500 text-xs">{token.description}</p>}
-            {avatar?.attribution && (
-              <p className="text-[11px] text-slate-500" data-testid="identity-attribution">
-                3D avatar: <a className="underline" href={avatar.sourceUrl || "https://vipe.io"} target="_blank" rel="noreferrer">{avatar.attribution}</a> (<a className="underline" href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>)
-              </p>
-            )}
           </div>
         </Panel>
       </div>

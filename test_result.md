@@ -210,6 +210,20 @@ frontend:
         -working: true
         -agent: "main"
         -comment: "Home renders with hero, 3D VIPE Hero character materializing in preview, honest empty state for live tokens. Verified via screenshot."
+        -working: true
+        -agent: "testing"
+        -comment: "BRANDING REMOVAL VERIFIED: All forbidden brand strings successfully removed. Home page footer shows 'ALIVE.FUN · LIVING TOKEN CHARACTERS · LOCAL VOICE · REAL-TIME 3D' (previously had VIPE/CC BY/KOKORO/THREE.JS branding). Explore page avatars show 'Hero #1000' format (not 'VIPE Hero'), collection is 'ALIVE Originals' (not 'VIPE Heroes'). Create page character generation works, names like 'WAR THE THIRD' without VIPE branding. Character Lab voice label shows 'VOICE' cleanly (no KOKORO). AI model names (GPT, Claude, Gemini) correctly kept as intended. All core functionality working: 3D character rendering, navigation, avatar registry (3000 avatars), character generation. 14/14 tests passed."
+  - task: "Branding removal verification (VIPE, CC BY, KOKORO, THREE.JS removed)"
+    implemented: true
+    working: true
+    file: "frontend/src/App.js, backend/registry.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "testing"
+        -comment: "VERIFIED: All third-party branding successfully removed from UI. Tested all pages (Home, Explore, Create, Character Lab). Footer changed from 'AVATARS: VIPE HEROES (CC BY 4.0) · VOICE: KOKORO (LOCAL) · 3D: THREE.JS + VRM' to 'ALIVE.FUN · LIVING TOKEN CHARACTERS · LOCAL VOICE · REAL-TIME 3D'. Avatar names changed from 'VIPE Hero #123' to 'Hero #123'. Collection name changed from 'VIPE Heroes' to 'ALIVE Originals'. Voice labels no longer show 'KOKORO'. Backend registry.py correctly strips 'VIPE' from names and sets collection to 'ALIVE Originals'. AI model names (GPT, Claude, Gemini) intentionally kept as they are user-facing brain options, not third-party branding to remove."
 
 metadata:
   created_by: "main_agent"
@@ -232,3 +246,5 @@ agent_communication:
     -message: "Fixed POST /api/users/wallet by popping lastSeen from the $setOnInsert doc. Verified 200 OK and idempotent on retry. Backend now fully functional."
     -agent: "testing"
     -message: "Backend testing COMPLETE. Created comprehensive test suite (backend_test.py, websocket_test.py, additional_tests.py) and verified all critical endpoints. Results: 14/14 core tests PASSED, WebSocket PASSED, 6/7 additional tests PASSED. All high-priority tasks verified working. Only minor issue: POST /api/users/wallet has MongoDB conflict error (non-critical user tracking feature). All core functionality restored and working: health check, avatar registry (3000 avatars), character generation, VRM file proxy with object storage, token create/import, DexScreener integration, PumpPortal transaction building, WebSocket real-time updates, and cloud brain with EMERGENT_LLM_KEY (gemini-3.8-flash). Environment restoration successful."
+    -agent: "testing"
+    -message: "BRANDING REMOVAL VERIFICATION COMPLETE: All third-party 3D-avatar-source and voice-engine branding successfully removed from UI. Tested all pages with comprehensive Playwright script. Results: 14/14 tests PASSED. Home page footer now shows 'ALIVE.FUN · LIVING TOKEN CHARACTERS · LOCAL VOICE · REAL-TIME 3D' (removed VIPE HEROES, CC BY 4.0, KOKORO, THREE.JS). Explore page avatars display as 'Hero #1000' format (removed VIPE prefix), collection shows 'ALIVE Originals' (removed VIPE Heroes). Create page character generation working with clean names like 'WAR THE THIRD'. Character Lab voice label shows 'VOICE' without KOKORO branding. AI model names (GPT, Claude, Gemini) correctly retained as user-facing brain options. All core functionality verified working: 3D character rendering, navigation, avatar registry (3000 avatars), character generation. No regressions detected."

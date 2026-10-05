@@ -101,7 +101,7 @@ export default function CharacterLab() {
               </div>
               <div><div className="font-mono text-[10px] text-slate-500 mb-1">PERSONALITY</div>
                 <Select testid="lab-personality-select" value={vibe} onChange={onVibe}>{vibes.vibes?.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}</Select></div>
-              <div><div className="font-mono text-[10px] text-slate-500 mb-1">VOICE (KOKORO)</div>
+              <div><div className="font-mono text-[10px] text-slate-500 mb-1">VOICE</div>
                 <Select testid="lab-voice-select" value={voice} onChange={setVoice}>{KOKORO_VOICES.map((v) => <option key={v} value={v}>{v}</option>)}</Select></div>
               <div><div className="font-mono text-[10px] text-slate-500 mb-1">RENDER QUALITY</div>
                 <Select testid="lab-quality-select" value={quality} onChange={setQuality}>{["low", "medium", "high", "none"].map((q) => <option key={q} value={q}>{q}</option>)}</Select></div>

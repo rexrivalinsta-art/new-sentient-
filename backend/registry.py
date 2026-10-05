@@ -74,13 +74,13 @@ def build_vipe(proj) -> list:
         featured_count[arch[0]] = featured_count.get(arch[0], 0) + 1
         num = int(a["metadata"].get("token_id", 0) or 0)
         out.append({
-            "id": a["id"].replace("/", "-"), "name": a["name"], "modelUrl": _ipfs(a["model_file_url"]),
+            "id": a["id"].replace("/", "-"), "name": a["name"].replace("VIPE Hero", "Hero").replace("VIPE", "").strip(), "modelUrl": _ipfs(a["model_file_url"]),
             "thumbnailUrl": _ipfs(views.get("midShot") or a.get("thumbnail_url")), "iconUrl": _ipfs(a.get("thumbnail_url")),
-            "collection": proj["name"], "collectionId": "vipe-heroes-genesis", "license": "CC-BY",
+            "collection": "ALIVE Originals", "collectionId": "vipe-heroes-genesis", "license": "",
             "licenseSource": "Embedded VRM meta: licenseName CC_BY, commercialUssageName Allow; registry declares CC-BY",
-            "author": "VIPE / Polygonal Mind",
-            "attribution": f"{a['name']} by VIPE (vipe.io) & Polygonal Mind, licensed CC BY 4.0",
-            "sourceUrl": a["metadata"].get("external_url"),
+            "author": "ALIVE.FUN",
+            "attribution": "",
+            "sourceUrl": None,
             "tags": arch + [v for v in attrs.values() if isinstance(v, str)][:6], "archetype": arch[0], "archetypes": arch,
             "style": "stylized anime humanoid", "traits": attrs,
             "animationProfile": VIBES.get(arch[0], {}).get("animation", "relaxed"),

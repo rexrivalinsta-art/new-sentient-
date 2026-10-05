@@ -83,12 +83,6 @@ export function LiveCharacterStage({ avatar, params, driver, quality, framing = 
       <div className="absolute inset-0 scanline pointer-events-none opacity-40" />
       <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#050608] to-transparent pointer-events-none" />
       {children}
-      {avatar?.attribution && (
-        <a href={avatar.sourceUrl || "https://vipe.io"} target="_blank" rel="noreferrer" data-testid="avatar-attribution"
-          className="absolute right-3 bottom-2 z-20 font-mono text-[9px] tracking-wider text-slate-500 hover:text-slate-300 max-w-[60%] truncate">
-          AVATAR: {avatar.attribution}
-        </a>
-      )}
     </div>
   );
 }

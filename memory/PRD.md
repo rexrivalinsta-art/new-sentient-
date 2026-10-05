@@ -42,6 +42,11 @@ Pump.fun-based launchpad where every token is a LIVE AI 3D character (VRM, Three
 - Removed auto-imported trending tokens and the top-up loop: feed shows ONLY tokens launched or deliberately linked/imported by a user here (importedBy="user")
 - Home: honest empty state + "PREVIEW · NO TOKEN YET" idle character when no tokens exist
 
+## Iteration 5 (2026-10) — restore + de-brand
+- Restored from GitHub: recreated gitignored .env (Mongo, Solana RPC/WS, PumpPortal, EMERGENT_LLM_KEY), reinstalled deps, services running
+- Fixed POST /api/users/wallet 500 ($set/$setOnInsert lastSeen conflict)
+- Removed all third-party 3D-avatar source branding (VIPE/vipe.io/Polygonal Mind/CC BY) + voice/3D engine names from UI: avatar names now "Hero #N", collection "ALIVE Originals", author "ALIVE.FUN", attribution blank; neutral footer; voice label "LOCAL"/"VOICE". AI brain model names (GPT/Claude/Gemini) intentionally KEPT as selectable options. Verified by testing agent (14/14).
+
 ## Backlog
 - P1: Kokoro WebGPU path for faster voice on capable desktops; pre-synthesis of queued lines
 - P1: Holder count via free source; PumpSwap trade-level parsing (currently state-level via DexScreener)
