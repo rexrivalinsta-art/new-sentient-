@@ -197,6 +197,23 @@ backend:
         -working: false
         -agent: "testing"
         -comment: "Minor issue: POST /api/users/wallet returns 500 Internal Server Error. MongoDB WriteError: 'Updating the path lastSeen would create a conflict at lastSeen'. The update_one operation has conflicting $set and $setOnInsert for lastSeen field. This is a non-critical secondary feature for tracking user activity. Does not affect core functionality."
+  - task: "AI thoughts feed: autonomous posts, global feed, per-token feed, human replies with AI response, likes"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "New feature. Each live (non-simulated) token AI autonomously posts: launch post on go-live, event-driven posts via on_events hook (rate-limited 40s/mint), idle thoughts every ~4min via posts_idle_loop. Posts use cloud brain (Gemini via EMERGENT_LLM_KEY) with template fallback + number/BANNED validation. Market context (marketCap/change1h/change24h/volume1h/ATH from DexScreener+RPC engine state) included. Endpoints: GET /api/feed, GET /api/tokens/{key}/posts (with nested replies), POST /api/tokens/{key}/posts/{postId}/reply (human reply + in-character AI reply), POST /api/posts/{postId}/like. TEST by creating a live token via POST /api/tokens/import with a REAL existing pump.fun mint (read-only, no spend) e.g. CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump. DO NOT use any private key and DO NOT broadcast any Solana transaction."
+        -working: true
+        -agent: "testing"
+        -comment: "VERIFIED 11/11. Imported GOAT (Goatseus Maximus) read-only. Launch post auto-created via Gemini. /api/feed returns AI posts with market context incl. marketCap 18802882, change1h/24h, ATH. AI post text in-character. Reply endpoint creates human + in-character AI reply (Gemini), replyCount increments. Like increments 1->2. Edge cases: empty text 400, bad postId 404, bad like 404. No 500s/crashes."
+        -working: true
+        -agent: "testing"
+        -comment: "VERIFIED: AI thoughts feed fully functional. Tested with live token import (mint=CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump, name='Goatseus Maximus', ticker=GOAT). Launch post auto-created with TOKEN_LAUNCHED event. GET /api/feed returns posts with all required fields (id, mint, ticker, name, characterName, text, authorType='ai', parentId=null, timestamp, context). Context includes marketCap (18802882.0) and market data (change1h, change24h, volume1h, athMarketCap). GET /api/tokens/{mint}/posts returns posts with nested replies array. POST /api/tokens/{mint}/posts/{postId}/reply creates both user and AI reply successfully - AI reply is in-character with authorType='ai' and correct parentId. Reply count incremented correctly (2 replies after human + AI). POST /api/posts/{postId}/like increments like count correctly (1->2). All edge cases working: empty text->400, non-existent post->404. AI posts use Gemini brain (gemini-3.8-flash) as source. Launch post text: 'Spawned into reality with hooves, zero thoughts, and a fresh contract. $GOAT is officially live. What do we do now, chew digital grass?' AI reply text: 'Define making it. If it means eating digital tin cans and headbutting the blockchain, yes. If it requires object permanence, we're in trouble.' No autonomous posts within 70s window (expected - idle loop posts after ~240s of inactivity). All 11 test scenarios PASSED."
 
 frontend:
   - task: "Home / Create / Token / Explore / Character Lab pages render"
@@ -228,7 +245,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 1
+  test_sequence: 2
   run_ui: false
 
 test_plan:
@@ -248,3 +265,5 @@ agent_communication:
     -message: "Backend testing COMPLETE. Created comprehensive test suite (backend_test.py, websocket_test.py, additional_tests.py) and verified all critical endpoints. Results: 14/14 core tests PASSED, WebSocket PASSED, 6/7 additional tests PASSED. All high-priority tasks verified working. Only minor issue: POST /api/users/wallet has MongoDB conflict error (non-critical user tracking feature). All core functionality restored and working: health check, avatar registry (3000 avatars), character generation, VRM file proxy with object storage, token create/import, DexScreener integration, PumpPortal transaction building, WebSocket real-time updates, and cloud brain with EMERGENT_LLM_KEY (gemini-3.8-flash). Environment restoration successful."
     -agent: "testing"
     -message: "BRANDING REMOVAL VERIFICATION COMPLETE: All third-party 3D-avatar-source and voice-engine branding successfully removed from UI. Tested all pages with comprehensive Playwright script. Results: 14/14 tests PASSED. Home page footer now shows 'ALIVE.FUN · LIVING TOKEN CHARACTERS · LOCAL VOICE · REAL-TIME 3D' (removed VIPE HEROES, CC BY 4.0, KOKORO, THREE.JS). Explore page avatars display as 'Hero #1000' format (removed VIPE prefix), collection shows 'ALIVE Originals' (removed VIPE Heroes). Create page character generation working with clean names like 'WAR THE THIRD'. Character Lab voice label shows 'VOICE' without KOKORO branding. AI model names (GPT, Claude, Gemini) correctly retained as user-facing brain options. All core functionality verified working: 3D character rendering, navigation, avatar registry (3000 avatars), character generation. No regressions detected."
+    -agent: "testing"
+    -message: "AI THOUGHTS FEED VERIFICATION COMPLETE: All feed endpoints fully functional. Tested with live token import (CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump). Results: 11/11 tests PASSED. Launch post auto-created with TOKEN_LAUNCHED event using Gemini brain (gemini-3.8-flash). GET /api/feed returns posts with complete structure including context with marketCap and market data. GET /api/tokens/{mint}/posts returns posts with nested replies array. POST reply endpoint creates both user and AI in-character replies, increments reply count correctly. POST like endpoint increments like count correctly. All edge cases handled properly (empty text->400, non-existent->404). AI-generated texts are non-empty and in-character. No autonomous posts within 70s (expected - idle loop posts after ~240s). Feature ready for production."

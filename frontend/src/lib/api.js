@@ -30,6 +30,10 @@ export const api = {
   brainModels: () => http.get("/brain/models").then((r) => r.data),
   importToken: (body) => http.post("/tokens/import", body, { timeout: 30000 }).then((r) => r.data),
   wallet: (wallet) => http.post("/users/wallet", { wallet }).catch(() => null),
+  feed: (limit = 50) => http.get("/feed", { params: { limit } }).then((r) => r.data.items),
+  tokenPosts: (key, limit = 50) => http.get(`/tokens/${key}/posts`, { params: { limit } }).then((r) => r.data),
+  replyPost: (key, postId, text, wallet) => http.post(`/tokens/${key}/posts/${postId}/reply`, { text, wallet }, { timeout: 20000 }).then((r) => r.data),
+  likePost: (postId) => http.post(`/posts/${postId}/like`).then((r) => r.data),
 };
 
 export const errMsg = (e) => e?.response?.data?.detail || e?.message || "Something went wrong";

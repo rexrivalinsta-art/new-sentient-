@@ -5,6 +5,7 @@ import { LiveCharacterStage } from "@/components/LiveCharacterStage";
 import { StageHUD } from "@/components/StageHUD";
 import { MarketChart, MemoryPanel, StatGrid, TradeStream } from "@/components/MarketPanels";
 import { useLiveCharacter } from "@/hooks/useLiveCharacter";
+import { TokenThoughts } from "@/components/Thoughts";
 import { shortAddr } from "@/lib/format";
 import { ExternalLink } from "lucide-react";
 
@@ -57,6 +58,9 @@ function LiveToken({ bundle }) {
         )}
         {ai.feed === "reconnecting" && <div className="font-mono text-[10px] tracking-widest text-[#ff2e51] border border-[#ff2e51]/30 px-3 py-2" data-testid="reconnecting-notice">MARKET FEED RECONNECTING — NO ACTIVITY IS BEING FABRICATED.</div>}
         <StatGrid state={ai.state} memory={ai.memory} />
+        <Panel title="THOUGHTS" testid="thoughts-panel" right={<span className="font-mono text-[10px] text-slate-600">AI POSTS + REPLIES</span>}>
+          <TokenThoughts tokenKey={token.mint} characterName={profile.characterName} />
+        </Panel>
         <Panel title="MARKET CAP" testid="chart-panel"><div className="p-2"><MarketChart history={history} ath={ai.state?.athMarketCap} /></div></Panel>
         <Panel title="LIVE TRANSACTIONS" testid="trades-panel" right={<span className="font-mono text-[10px] text-slate-600">WHALE ≥ {ai.state?.whaleThresholdSol ?? "—"} SOL</span>}>
           <TradeStream trades={ai.trades} />

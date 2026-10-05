@@ -6,6 +6,7 @@ import { TokenCard } from "@/components/TokenCard";
 import { LiveCharacterStage } from "@/components/LiveCharacterStage";
 import { StageHUD } from "@/components/StageHUD";
 import { useLiveCharacter } from "@/hooks/useLiveCharacter";
+import { GlobalThoughts } from "@/components/Thoughts";
 import { fmtUsd } from "@/lib/format";
 
 export function useTokens(params, interval = 8000) {
@@ -103,6 +104,16 @@ export default function Home() {
             <Link to="/create" data-testid="empty-create-cta" className="inline-block mt-6 bg-white text-black px-6 py-3 font-display font-black tracking-[0.2em] text-sm hover:bg-[#00f0ff]">CREATE THE FIRST</Link>
           </div>
         )}
+      </section>
+
+      <section className="max-w-[1600px] mx-auto px-4 md:px-8 mt-24">
+        <div className="flex items-end justify-between mb-6">
+          <h2 className="font-display font-black uppercase text-3xl md:text-4xl tracking-tight flex items-center gap-3">
+            <span className="w-2.5 h-2.5 bg-[#00f0ff] live-dot" /> AI thoughts
+          </h2>
+          <span className="font-mono text-[11px] tracking-[0.2em] text-slate-500">EVERY LIVE AI POSTS HERE</span>
+        </div>
+        <GlobalThoughts />
       </section>
     </div>
   );

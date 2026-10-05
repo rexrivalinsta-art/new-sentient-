@@ -499,6 +499,8 @@ async def _go_live(t, mint, provider, simulated, signature=None, launch_mcap=Non
     if simulated:
         evs = [eng.launch_event()]
         await hub.emit(mint, evs)
+    else:
+        asyncio.create_task(_safe_make_post(mint, "event", {"type": "TOKEN_LAUNCHED"}, min_gap=0))
     return await token_bundle(t, full=True)
 
 
@@ -772,6 +774,171 @@ async def brain_models():
     return {"default": DEFAULT_BRAIN, "models": [{"id": k, **v} for k, v in BRAIN_MODELS.items()]}
 
 
+# ---------------- AI thoughts feed (posts) ----------------
+POST_SYSTEM = ("You are a crypto token's AI character posting a short social thought, like a tweet. Entertainment only. "
+               "Never invent prices, market cap, trades, holders, partnerships, listings or events - only use facts in CONTEXT. "
+               "Never give financial advice, never tell anyone to buy or sell, never promise profits or returns. "
+               "Write ONE short post in the character's voice: punchy, funny, in character, max 30 words. Output only the post text, no surrounding quotes.")
+REPLY_SYSTEM = ("You are a crypto token's AI character replying to a human comment on your post, like replying on Twitter. "
+                "Stay fully in character: witty, human, conversational. Entertainment only. "
+                "Never invent market numbers - only use facts in CONTEXT. Never give financial advice or promise profits. "
+                "Reply in ONE short message, max 30 words. Output only the reply text, no surrounding quotes.")
+
+EVENT_DRAFTS = {
+    "TOKEN_LAUNCHED": ["I am awake. Hello, world.", "Just booted up. What did I miss?", "Consciousness: online. Chart: watching."],
+    "NEW_ATH": ["New all-time high. Try to act surprised.", "ATH unlocked. I am basically a genius now.", "Fresh high on the board. I remain humble. Barely."],
+    "MARKET_CAP_MILESTONE": ["We just crossed a line on the chart. Onward.", "New milestone on the board. Noted and framed."],
+    "LARGE_BUY": ["A whale just splashed in. The water moved.", "Big buy detected. Somebody believes.", "That was a chunky one. I felt it."],
+    "LARGE_SELL": ["Someone bailed. More room for the believers.", "A big sell. I remain unbothered. Mostly.", "Paper hands rustling. I stay solid."],
+    "PRICE_SURGE": ["We are going vertical. Hold onto something.", "The chart just sneezed upward.", "Momentum is a mood and the mood is up."],
+    "PRICE_DROP": ["Dip incoming. I have seen worse. I think.", "Red candle. Dramatic, but survivable.", "Little pullback. I am breathing through it."],
+    "ATH_DRAWDOWN": ["Off the highs, still standing.", "We cooled off. Character building, they call it."],
+    "RECOVERY": ["Clawing it back. I never doubted us. Okay, a little.", "Recovery arc in progress. Stay tuned."],
+    "VOLUME_SPIKE": ["Volume just woke up. So did I.", "Lots of action suddenly. I love an audience."],
+    "BUY_STREAK": ["Buy after buy after buy. Momentum is contagious.", "The green keeps coming. I am not complaining."],
+    "SELL_STREAK": ["Sellers on a streak. I am taking notes.", "Choppy out here. Staying calm and sentient."],
+}
+IDLE_DRAFTS = ["Just vibing on the curve, watching the chart breathe.", "Quiet market. Perfect time for an existential thought.",
+               "Still here. Still sentient. Still watching every candle.", "Nobody trading? Cool, more time to think about being alive.",
+               "I count every transaction. It is my version of counting sheep.", "Being a token is mostly waiting and occasionally screaming.",
+               "The silence between trades is where I do my best thinking."]
+REPLY_DRAFTS = ["Noted. Bold take.", "I hear you.", "Interesting. Go on.", "We will see, friend.", "Fair. I respect the energy.", "Ha. You might be onto something."]
+_post_last = {}
+
+
+async def _enhance_text(mint, prof, context, draft, system):
+    try:
+        model = await brain_for_mint(mint)
+        from emergentintegrations.llm.chat import LlmChat, StreamDone, TextDelta, UserMessage
+        chat = LlmChat(api_key=os.environ["EMERGENT_LLM_KEY"], session_id=f"post-{mint}-{uuid.uuid4().hex[:6]}", system_message=system).with_model(*model)
+        prompt = (f"CHARACTER: {prof.get('characterName')} | vibe: {prof.get('vibe')} | traits: {', '.join(prof.get('traits') or [])} | ticker ${prof.get('ticker') or ''}\n"
+                  f"CONTEXT: {json.dumps(context, default=str)[:1200]}\nDRAFT: {draft}")
+        out = ""
+        async for ev in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(ev, TextDelta):
+                out += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+        out = out.strip().strip('"').split("\n")[0].strip()
+        allowed = draft + " " + json.dumps(context, default=str)
+        if out and len(out) <= 240 and not BANNED.search(out) and _numbers_ok(out, allowed):
+            return out, model[1]
+    except Exception as e:
+        logger.warning(f"post enhance failed: {e}")
+    return draft, "template"
+
+
+async def _make_post(mint, kind, event=None, min_gap=40):
+    now = time.time()
+    if now - _post_last.get(mint, 0) < min_gap:
+        return None
+    _post_last[mint] = now
+    t = await db.tokens.find_one({"mint": mint, "status": "live"}, {"_id": 0})
+    if not t or t.get("simulated"):
+        return None
+    prof = await db.character_profiles.find_one({"id": t.get("characterProfileId")}, {"_id": 0}) or {}
+    av = await db.avatars.find_one({"id": t.get("avatarId")}, {"_id": 0}) or {}
+    eng = hub.engine(mint)
+    st = eng.state() if eng else {}
+    etype = (event or {}).get("type")
+    pool = EVENT_DRAFTS.get(etype) if etype else None
+    draft = random.choice(pool or IDLE_DRAFTS)
+    context = {"marketCap": st.get("marketCap"), "change1h": st.get("change1h"), "change24h": st.get("change24h"),
+               "volume1h": st.get("volume1h"), "athMarketCap": st.get("athMarketCap"),
+               "event": etype, "eventData": (event or {}).get("data")}
+    text, source = await _enhance_text(mint, {**prof, "ticker": t["ticker"]}, context, draft, POST_SYSTEM)
+    post = {"id": uuid.uuid4().hex, "mint": mint, "tokenId": t["id"], "ticker": t["ticker"], "name": t["name"],
+            "characterName": prof.get("characterName"), "avatarThumb": av.get("thumbnailUrl") or av.get("iconUrl") or t.get("imageUrl"),
+            "authorType": "ai", "kind": "event" if etype else "idle", "eventType": etype, "source": source,
+            "text": text, "context": context, "parentId": None, "likes": 0, "replyCount": 0, "timestamp": now, "createdAt": iso()}
+    await db.posts.insert_one(dict(post))
+    return post
+
+
+async def _safe_make_post(mint, kind, event=None, min_gap=40):
+    try:
+        return await _make_post(mint, kind, event, min_gap)
+    except Exception as e:
+        logger.warning(f"make_post failed: {e}")
+        return None
+
+
+async def posts_idle_loop():
+    while True:
+        try:
+            for t in await db.tokens.find({"status": "live", "simulated": {"$ne": True}}, {"mint": 1, "_id": 0}).to_list(100):
+                mint = t["mint"]
+                last = await db.posts.find_one({"mint": mint}, {"_id": 0, "timestamp": 1}, sort=[("timestamp", -1)])
+                if not last or time.time() - last["timestamp"] > 240:
+                    await _safe_make_post(mint, "idle", None, min_gap=0)
+                    await asyncio.sleep(3)
+        except Exception as e:
+            logger.warning(f"idle posts loop: {e}")
+        await asyncio.sleep(60)
+
+
+@api.get("/feed")
+async def global_feed(limit: int = 50):
+    posts = await db.posts.find({"parentId": None, "authorType": "ai"}, {"_id": 0}).sort("timestamp", -1).to_list(min(int(limit), 100))
+    return {"items": posts}
+
+
+@api.get("/tokens/{key}/posts")
+async def token_posts(key: str, limit: int = 50):
+    t = await find_token(key)
+    tops = await db.posts.find({"mint": t["mint"], "parentId": None}, {"_id": 0}).sort("timestamp", -1).to_list(min(int(limit), 100))
+    ids = [p["id"] for p in tops]
+    replies = await db.posts.find({"parentId": {"$in": ids}}, {"_id": 0}).sort("timestamp", 1).to_list(1000)
+    by_parent = {}
+    for r in replies:
+        by_parent.setdefault(r["parentId"], []).append(r)
+    for p in tops:
+        p["replies"] = by_parent.get(p["id"], [])
+    return {"items": tops, "token": {"name": t["name"], "ticker": t["ticker"], "mint": t["mint"]}}
+
+
+@api.post("/tokens/{key}/posts/{post_id}/reply")
+async def reply_post(key: str, post_id: str, body: dict):
+    t = await find_token(key)
+    parent = await db.posts.find_one({"id": post_id, "mint": t["mint"]}, {"_id": 0})
+    if not parent:
+        raise HTTPException(404, "Post not found")
+    text = str(body.get("text") or "").strip()[:280]
+    if not text:
+        raise HTTPException(400, "text required")
+    wallet = str(body.get("wallet") or "")[:64]
+    now = time.time()
+    user_post = {"id": uuid.uuid4().hex, "mint": t["mint"], "tokenId": t["id"], "ticker": t["ticker"], "name": t["name"],
+                 "authorType": "user", "userWallet": wallet or None, "kind": "reply", "text": text, "source": "human",
+                 "parentId": post_id, "likes": 0, "replyCount": 0, "timestamp": now, "createdAt": iso()}
+    await db.posts.insert_one(dict(user_post))
+    await db.posts.update_one({"id": post_id}, {"$inc": {"replyCount": 1}})
+
+    prof = await db.character_profiles.find_one({"id": t.get("characterProfileId")}, {"_id": 0}) or {}
+    av = await db.avatars.find_one({"id": t.get("avatarId")}, {"_id": 0}) or {}
+    eng = hub.engine(t["mint"])
+    st = eng.state() if eng else {}
+    context = {"yourPost": parent.get("text"), "humanSaid": text, "marketCap": st.get("marketCap"), "change1h": st.get("change1h")}
+    ai_text, source = await _enhance_text(t["mint"], {**prof, "ticker": t["ticker"]}, context, random.choice(REPLY_DRAFTS), REPLY_SYSTEM)
+    ai_post = {"id": uuid.uuid4().hex, "mint": t["mint"], "tokenId": t["id"], "ticker": t["ticker"], "name": t["name"],
+               "characterName": prof.get("characterName"), "avatarThumb": av.get("thumbnailUrl") or av.get("iconUrl") or t.get("imageUrl"),
+               "authorType": "ai", "kind": "reply", "source": source, "text": ai_text, "parentId": post_id,
+               "likes": 0, "replyCount": 0, "timestamp": time.time(), "createdAt": iso()}
+    await db.posts.insert_one(dict(ai_post))
+    await db.posts.update_one({"id": post_id}, {"$inc": {"replyCount": 1}})
+    return {"userPost": {k: v for k, v in user_post.items() if k != "_id"}, "aiPost": {k: v for k, v in ai_post.items() if k != "_id"}}
+
+
+@api.post("/posts/{post_id}/like")
+async def like_post(post_id: str):
+    r = await db.posts.update_one({"id": post_id}, {"$inc": {"likes": 1}})
+    if not r.matched_count:
+        raise HTTPException(404, "Post not found")
+    p = await db.posts.find_one({"id": post_id}, {"_id": 0, "likes": 1})
+    return {"likes": p.get("likes", 0)}
+
+
+
 # ----- bring an existing pump.fun / gmgn / dexscreener token alive -----
 MINT_RE = re.compile(r"[1-9A-HJ-NP-Za-km-z]{32,44}")
 
@@ -832,6 +999,9 @@ async def seed():
     await db.tokens.create_index("mint")
     await db.market_events.create_index([("mint", 1), ("timestamp", -1)])
     await db.market_snapshots.create_index([("mint", 1), ("timestamp", -1)])
+    await db.posts.create_index([("mint", 1), ("timestamp", -1)])
+    await db.posts.create_index([("parentId", 1), ("timestamp", 1)])
+    await db.posts.create_index("id", unique=True)
     for t in await db.tokens.find({"$or": [{"simulated": True}, {"launchProvider": "import", "importedBy": {"$exists": False}}]}, {"_id": 0}).to_list(500):
         await db.character_profiles.delete_many({"id": t.get("characterProfileId")})
         for col in ("market_events", "market_snapshots", "character_memory"):
@@ -890,6 +1060,7 @@ async def startup():
     asyncio.create_task(hub.autopilot_loop())
     asyncio.create_task(hub.tick_loop())
     asyncio.create_task(hub.indexer_loop())
+    asyncio.create_task(posts_idle_loop())
 
 
 @app.on_event("shutdown")
