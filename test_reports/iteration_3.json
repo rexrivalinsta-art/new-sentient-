@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 3: Platform auto-assigns body+voice+personality; creator only picks AI brain. Verified brain catalog, unique avatar/voice across 3 token creations, grok rejected, PATCH only accepts brainModel, import_token with brainModel, no simulated tokens in public feed, mock launch 410, home empty state, /create UI (no vibe chips / describe / generate / reroll buttons), BrainPicker + import-brain picker, launch dialog shows CHARACTER + AI BRAIN with assigned mix. 12/12 pytest + full frontend flow passed.",
+  "backend_tests": {
+    "GET /api/brain/models": "PASS - 6 available (gpt-6-astra, gpt-6-luna, claude-sonnet-5-5, claude-opus-5-5, gemini-3.1-pro-preview, gemini-3.8-flash) + grok available:false with xAI note",
+    "POST /api/tokens auto-assign": "PASS - avatarId, voice, vibeLabel, brainLabel auto-populated; profile.brainModel matches body.brainModel",
+    "POST /api/tokens x3 unique": "PASS - 3 distinct avatarIds and >=2 distinct voices",
+    "POST /api/tokens ignores client avatar/voice": "PASS - passed avatarId/voice are discarded",
+    "POST /api/tokens brainModel=grok": "PASS - returns 400",
+    "PATCH /api/tokens/{id}/character": "PASS - only brainModel is applied; avatarId/voice in body are silently ignored (not persisted)",
+    "POST /api/brain/line (gpt-6-astra profile)": "PASS - source='gpt-6-astra' after PATCHing brain, no hallucinated numbers",
+    "POST /api/tokens/import invalid input": "PASS - returns 400",
+    "POST /api/tokens/import brainModel=grok": "PASS - idempotent 200 if token exists, else 400 brain rejected",
+    "GET /api/tokens public feed": "PASS - zero simulated tokens",
+    "POST /api/launch/mock": "PASS - returns 410 (disabled by design)"
+  },
+  "frontend_tests": {
+    "Home empty state": "PASS - live-tokens-empty + hero-preview-stage visible with 'PREVIEW · NO TOKEN YET' label; no fabricated market data",
+    "/create no character picker UI": "PASS - no vibe-chip, no character-description, no generate-character buttons; the string 'rerolled' only appears in the explanatory auto-assign-note copy (describing why it CAN'T be rerolled)",
+    "/create BrainPicker": "PASS - brain-model-gpt-6-astra, gpt-6-luna, claude-sonnet-5-5, claude-opus-5-5, gemini-3.1-pro-preview, gemini-3.8-flash, grok all rendered; grok button has disabled attribute",
+    "/create import panel BrainPicker": "PASS - import-brain-model-gpt-6-astra, gemini-3.8-flash, grok etc. present (prefix='import-')",
+    "/create auto-assign-note": "PASS - informative note visible before launch",
+    "/create LAUNCH TOKEN flow": "PASS - clicking open-launch-dialog-button creates draft via POST /api/tokens (brainModel=gpt-6-astra), preview-character-name shows 'Commander QAUI1', dialog shows CHARACTER = name + VIPE Hero avatar + voice, AI BRAIN = GPT-6 Astra",
+    "Launch methods": "PASS - launch-method-pumpportal (Pump.fun · Wallet) + launch-method-handoff (Official Pump.fun); no simulated/mock option exposed"
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py now 896 lines - still above the 700-line guideline. Splitting into routers (brain, tokens, launch, lab, avatars, websocket) is overdue.",
+    "update_character silently drops avatarId/voice keys instead of returning 400 when a client tries to change them - current behavior matches spec ('ignored') but a 400 or 409 would make the API self-documenting.",
+    "_mint_brain is an in-process dict; horizontal scaling (>1 pod) would see stale brainModel after PATCH. Move to Redis or re-read from DB each call.",
+    "import_token still has no per-wallet / per-IP rate limit - cheap DoS vector (DexScreener fan-out + Solana RPC call per request).",
+    "No cleanup/delete endpoint for drafted tokens; QA runs accumulate rows (I purged tokens + character_profiles collections directly via Motor during testing)."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py", "/app/test_reports/iteration_3.json"],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% of iteration-3 flows"},
+  "test_credentials": "None required",
+  "seed_data_creation": "During test runs, created QA* draft tokens and imported CZJfrAmMs5Cz4H22PWzfqTJu5FkP7Q2Vvx1oPVL9pump; all cleaned up from db.tokens and db.character_profiles so the public feed is empty for the home-empty-state check.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file is now iteration-3 (12 tests, no dependency on seeded tokens). Public feed is expected to be EMPTY unless real pump.fun tokens have been imported. Run `pytest /app/backend/tests/backend_test.py -v`; the brain-line test will auto-import mint CZJf...pump if no live token exists, so clean up db.tokens + db.character_profiles afterwards if the home empty-state must stay empty. BrainPicker selectors: brain-model-{id} on /create main picker, import-brain-model-{id} on /create import panel. preview-character-name only appears AFTER clicking open-launch-dialog-button (ensureDraft is called inside openLaunch). Launch methods: launch-method-pumpportal + launch-method-handoff only (mock removed).",
+  "rca_of_the_issue": "No issues found."
+}
